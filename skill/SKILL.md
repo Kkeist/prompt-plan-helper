@@ -25,6 +25,12 @@ Formats and the example (this tool's own plan) are in `references/zh` and `refer
 - Examples and placeholders use invented or category words, never the user's own project.
 - End the reply with the gaps: number, place, what is missing, a suggestion, one concrete default. Suggestions stay in the reply until the user confirms.
 
+## From idea to a built app in one or two chats / 一两次对话做出来
+
+1. First reply: write the whole plan from what the user sent, not in pieces, and list every gap at once: number, place, what is missing, a suggestion, one concrete default. The user may answer "all defaults". 第一轮：一次写成完整计划书，缺口一次列全，用户可以回答「都按默认」。
+2. Second reply: fill in the answers, run `check` until nothing is TBD, and put the build notes (what first, how, how each feature is checked) in the same reply for approval. 第二轮：填入回答，跑到没有待补，同一条回复里给出做法请用户确认。
+3. After approval build straight through in that chat: update progress when a feature starts and when it is checked; ask only when two reasonable choices lead to different results. 确认之后一路做完，只有不同选择会得到不同结果时才问。
+
 ## Build notes and architecture / 做法和架构
 
 After the plan is confirmed, write the build notes as a separate file for the user to approve: what to build first, how, and how each feature is checked, in plain words. 计划书确认后，另外写一份做法给用户确认，使用平实的语言。
@@ -49,11 +55,17 @@ Each issue has a state shown live in the feature list: no prefix (to do), `Worki
 2. When you start one, set it to working; when the fix is checked, set it to done. Do not delete it: `node tools/shupian.mjs issue <plan> <number> doing|done`.
 3. A problem that reveals a gap in the plan is also written into the plan first, then fixed. 暴露出计划书缺口的问题，先补计划书再修。
 4. Once work has started the initial plan is not changed any more: new features, changed features, progress and issues are all made in the feature list, and the progress you set there is the state of the work right now. 开始做之后初始计划书不再改，加功能、改功能、进度和问题都记在功能清单里，进度代表当下的情况。
-5. Do not delete features the user wrote in the feature list; the app keeps earlier versions in `.shupian/history/` of the project folder, but do not rely on it.
+5. Do not delete features the user wrote in the feature list. Earlier versions are kept in `.shupian/history/` of the project folder: the desktop helper saves one by itself whenever the file changes, and the `progress` / `issue` commands save one before writing. Before editing the file directly, run `node tools/shupian.mjs snapshot <plan>` so the version before your edit is kept even when the helper is not running. The same folder holds the user's unsent issue drafts (`.shupian/drafts/`); leave `.shupian/` alone.
 
 ## Feedback from the floating window / 悬浮窗来的反馈
 
-The user pastes text with the page address, window size, the element they mean (path, text, size, styles), recent page errors, the page's visible headings and controls, and sometimes a screenshot. Find the code from the element path and styles first. Look at the screenshot only when the cause cannot be found otherwise: a "pseudo screenshot" is drawn from the page structure, so cross-origin images and fonts are blank.
+The user pastes text with the page address, window size, the element they mean (path, text, size, styles), recent page errors, the page's visible headings and controls, and sometimes a screenshot.
+
+1. Restate it in one sentence first: where (page or feature), what the user did, what they expected, what happened. Match it to a feature in the feature list by number and name; if none matches, say so.
+2. Tell a request from a problem: "I want X" is a new or changed feature and goes into the feature list; "X is broken" is an issue and goes under the matching feature's `Issues:`. If unsure, check whether X is implemented: implemented but not working is an issue, not implemented is a request.
+3. Find the code from the element path and styles first. Look at the screenshot only when the cause cannot be found otherwise: a "pseudo screenshot" is drawn from the page structure, so cross-origin images and fonts are blank.
+
+用户贴来的反馈：先用一句话复述（在哪、做了什么、期望什么、实际什么），对到功能清单里的功能；分清是需求还是问题；再用元素路径和样式定位，找不到才看截图。
 
 ## Windows
 
