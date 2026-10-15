@@ -57,7 +57,38 @@ function extensionInstalled() {
   return document.documentElement.hasAttribute('data-shupian-ext');
 }
 
-// 安装步骤：扩展文件由本机服务放到固定的文件夹，浏览器里加载这个文件夹
+// 书签：拖到书签栏，在任意网页上点一下，把悬浮窗从本机服务加载进当前页面（不用装扩展）
+function bookmarkletHref() {
+  const src = location.origin + '/shupian.js?k=' + SERVER.token;
+  return "javascript:(function(){var s=document.createElement('script');s.src='" + src + "&t='+Date.now();"
+    + "document.documentElement.setAttribute('data-shupian-open','');document.documentElement.appendChild(s)})();void 0";
+}
+
+// 安装内容：书签和浏览器扩展两种方式。info 是 /api/extension 的返回
+function installContent(kit, info) {
+  const openPage = (b, page) => Api.call('POST', '/api/extension', { browser: b.id, page }).catch((e) => kit.toast(t('could_not_open_the_extensions_page_why', { why: errText(e) })));
+  const steps = [t('extension_step_open'), t('extension_step_load'), t('extension_step_done'), t('extension_step_button')].map((x) => h('li', { text: x }));
+  const link = h('a', { class: 'bookmarklet', href: bookmarkletHref(), draggable: 'true', title: t('drag_to_the_bookmarks_bar') }, t('prompt_plan_helper'));
+  link.addEventListener('click', (e) => e.preventDefault());
+  return h('div', null,
+    h('div', { class: 'ext-block' },
+      h('h3', { text: t('bookmark_title') }),
+      h('p', { class: 'hint', text: t('bookmark_steps') }),
+      link,
+      h('p', { class: 'hint', text: t('bookmark_limits') })),
+    h('div', { class: 'ext-block' },
+      h('h3', { text: t('extension_title') }),
+      h('ol', { class: 'steps' }, steps),
+      h('div', { class: 'muted', text: t('extension_folder') }),
+      h('button', { type: 'button', class: 'fpath', title: t('copy_path'), 'aria-label': t('copy_path') + '：' + info.path, onclick: () => copyThen(kit, info.path) }, info.path),
+      info.browsers.some((b) => b.id === 'firefox') ? h('p', { class: 'hint', text: t('extension_step_firefox') }) : null,
+      info.browsers.length ? null : h('p', { class: 'hint', text: t('no_edge_or_chrome_was_found') }),
+      h('div', { class: 'row' }, info.browsers.map((b) => h('button', { type: 'button', class: 'btn', onclick: () => openPage(b, '') }, t('open_the_extensions_page_in_name', { name: b.name }))))),
+    info.browsers.length
+      ? h('div', { class: 'row' }, info.browsers.map((b) => h('button', { type: 'button', class: 'btn primary', onclick: () => openPage(b, 'install') }, t('open_the_install_page_in_name', { name: b.name }))))
+      : null);
+}
+
 async function openExtensionHelp(kit) {
   let info;
   try {
@@ -66,18 +97,10 @@ async function openExtensionHelp(kit) {
     kit.toast(t('could_not_prepare_the_extension_why', { why: errText(e) }));
     return;
   }
-  const openPage = (b) => Api.call('POST', '/api/extension', { browser: b.id }).catch((e) => kit.toast(t('could_not_open_the_extensions_page_why', { why: errText(e) })));
-  const steps = [t('extension_step_open'), t('extension_step_load'), t('extension_step_done'), t('extension_step_button')].map((x) => h('li', { text: x }));
   kit.openModal({
-    title: t('install_the_browser_extension'),
-    body: h('div', null,
-      h('ol', { class: 'steps' }, steps),
-      h('div', { class: 'muted', text: t('extension_folder') }),
-      h('button', { type: 'button', class: 'fpath', title: t('copy_path'), 'aria-label': t('copy_path') + '：' + info.path, onclick: () => copyThen(kit, info.path) }, info.path),
-      info.browsers.some((b) => b.id === 'firefox') ? h('p', { class: 'hint', text: t('extension_step_firefox') }) : null,
-      info.browsers.length ? null : h('p', { class: 'hint', text: t('no_edge_or_chrome_was_found') })),
-    foot: (close) => [h('button', { type: 'button', class: 'btn', onclick: close }, t('close'))].concat(
-      info.browsers.map((b, i) => h('button', { type: 'button', class: 'btn' + (i === 0 ? ' primary' : ''), onclick: () => openPage(b) }, t('open_the_extensions_page_in_name', { name: b.name })))),
+    title: t('install_the_floating_window'),
+    body: installContent(kit, info),
+    foot: (close) => [h('button', { type: 'button', class: 'btn', onclick: close }, t('close'))],
   });
 }
 

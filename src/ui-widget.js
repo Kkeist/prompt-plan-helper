@@ -27,11 +27,48 @@ function createFeedback(opts) {
   }
   const featLabel = (f) => (f.no ? f.no + ' ' : '') + f.name;
 
+  // 未提交的问题草稿：能连到计划书时存在项目文件夹里（桌面窗口读同一份），否则存在这个页面的浏览器本地；写入按顺序排队
+  const draftKey = NS + ':draft';
+  let draftTimer = 0;
+  let draftChain = Promise.resolve();
+  let draftExists = false;
+  const draftUrl = () => (link.state === 'ready' && link.project ? fileUrl(link.project, Draft.rel(link.project.file)) : '');
+
+  async function loadDraft() {
+    const url = draftUrl();
+    if (!url) return LS.get(draftKey, []);
+    const r = await Link.call('GET', url);
+    return r.exists ? Draft.parse(r.text) : [];
+  }
+
+  function queueDraft(rows) {
+    if (!rows.length && !draftExists) return;
+    draftExists = rows.length > 0;
+    const url = draftUrl();
+    draftChain = draftChain.then(async () => {
+      if (url) await Link.call('PUT', url, Draft.text(rows));
+      else if (!LS.set(draftKey, rows)) throw new Error(t('browser_storage_is_full_and_the_latest'));
+    }).catch((e) => kit.toast(t('could_not_save_the_draft_why', { why: e.message === 'down' ? t('the_desktop_window_did_not_respond') : errText(e) })));
+  }
+
+  async function restoreDraft() {
+    try {
+      const rows = await loadDraft();
+      if (rows.length && !list.items().length) { draftExists = true; list.restore(rows); }
+    } catch (e) {
+      kit.toast(t('could_not_load_the_draft_why', { why: errText(e) }));
+    }
+  }
+
   const list = createIssueList({
     kit,
     features: () => (link.state === 'ready' ? link.features : []),
     placeholder: () => (link.state === 'ready' ? t('describe_the_issue_you_can_several_features') : t('describe_what_to_change')),
     onTarget(f) { link.target = f; rememberTarget(); },
+    onChange() {
+      clearTimeout(draftTimer);
+      draftTimer = setTimeout(() => queueDraft(list.snapshot()), 500);
+    },
     // 每一条可以带多个元素：行上的按钮再选一个，下面一个元素一行，可以单独去掉
     rowTools(row) {
       return [h('button', { type: 'button', class: 'btn sm', onclick: () => pickInto(row) }, '＋ ' + t('pick_an_element'))];
@@ -101,7 +138,7 @@ function createFeedback(opts) {
   }
 
   async function loadLink() {
-    if (!Link.available) return;
+    if (!Link.available) { await restoreDraft(); render(); return; }
     link.state = 'loading';
     try {
       const data = await Link.call('GET', '/api/projects');
@@ -119,6 +156,7 @@ function createFeedback(opts) {
       link.why = e.message === 'unpaired' ? 'unpaired' : 'down';
     }
     list.syncTargets(link.state === 'ready' ? link.target : null);
+    await restoreDraft();
     render();
   }
 
@@ -131,6 +169,9 @@ function createFeedback(opts) {
     kit.openPop(anchor, (pop, close) => {
       link.projects.forEach((x) => pop.append(h('button', { type: 'button', class: x === link.project ? 'on' : '', onclick: async () => {
         close();
+        // 换计划书之前，把现在写的存进原来那份的草稿
+        clearTimeout(draftTimer);
+        queueDraft(list.snapshot());
         link.project = x;
         link.target = null;
         try { await loadPlan(); } catch (e) { link.state = 'off'; link.why = 'down'; }
@@ -162,6 +203,8 @@ function createFeedback(opts) {
       const r = Core.addIssues(f.text, hits.map((x) => ({ featureLine: x.hit.featureLine, text: x.it.text + whereText(x.it) })), Core.today());
       if (!r.ok) { kit.toast(t('write_the_issue_first')); return; }
       await Link.call('PUT', fileUrl(link.project, f.file), r.md);
+      clearTimeout(draftTimer);
+      queueDraft([]);
       list.reset(link.target);
       render();
       kit.toast(t('added_n_issues_to_the_plan', { n: r.added }));

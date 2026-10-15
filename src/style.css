@@ -309,3 +309,6 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .extrow.wait { visibility: hidden; }
 .extrow > .muted { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .steps { margin: 0 0 0.8em; padding-left: 1.4em; line-height: 1.6; }
+.ext-block { border: 1px solid var(--line); border-radius: 0.6em; padding: 0.5em 0.7em; margin: 0 0 0.6em; }
+.ext-block h3 { margin: 0 0 0.3em; font-size: 1em; }
+.bookmarklet { display: inline-block; border: 1px solid var(--ink); border-radius: 999px; padding: 0.3em 0.9em; margin: 0.2em 0; color: var(--ink); text-decoration: none; cursor: grab; }

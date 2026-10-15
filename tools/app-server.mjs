@@ -18,6 +18,7 @@ const home = homedir();
 export const STATE_DIR = join(home, '.shupian');
 export const STATE_FILE = join(STATE_DIR, 'server.json');
 const HISTORY_FILE = join(STATE_DIR, 'history.json');
+const WATCH_ERROR_FILE = join(STATE_DIR, 'watch-error.txt');
 const PLAN_NAMES = Core.PLAN_NAMES;
 const EXT_SRC = join(projectRoot, 'extension');
 export const EXT_DIR = join(STATE_DIR, 'extension');
@@ -142,13 +143,18 @@ function historyDir(root) {
   return join(resolve(root), '.shupian', 'history');
 }
 
-// 相对路径只允许顶层的计划书和功能清单文件，以及历史版本目录里的文件
+// 草稿：未提交的问题，文件夹里 .shupian/drafts/<计划书文件名>.json
+const DRAFT_NAME_RE = /^[^/\\:*?"<>|]+\.md\.json$/;
+
+// 相对路径只允许顶层的计划书和功能清单文件，以及历史版本和草稿目录里的文件
 function planPath(root, rel) {
   if (!root || !known(root)) return '';
   const p = String(rel || '');
   if (PLAN_FILE_RE.test(p) || Core.FEATURE_FILE_RE.test(p)) return join(resolve(root), p);
   const m = /^\.shupian\/history\/([^/]+)$/.exec(p);
   if (m && HISTORY_NAME_RE.test(m[1])) return join(historyDir(root), m[1]);
+  const d = /^\.shupian\/drafts\/([^/]+)$/.exec(p);
+  if (d && DRAFT_NAME_RE.test(d[1])) return join(resolve(root), '.shupian', 'drafts', d[1]);
   return '';
 }
 
@@ -166,6 +172,49 @@ function listHistory(root, file) {
     .filter((n) => HISTORY_NAME_RE.test(n) && n.slice(16).toLowerCase() === String(file).toLowerCase())
     .sort().reverse()
     .map((n) => ({ name: n, time: statSync(join(dir, n)).mtimeMs }));
+}
+
+// 功能清单被改写之前的旧版本：页面、命令行、AI 直接改文件都一样处理。
+// 有功能被去掉时马上存，平时隔 HISTORY_GAP 才存一份；和最新一份历史一样的不重复存；force 为真时不看间隔。
+const HISTORY_GAP = 5 * 60 * 1000;
+const lastSnap = new Map();
+const featureNames = (md) => Core.progressList(md).map((x) => x.name);
+
+export function snapshotFeatures(root, file, prev, next, force) {
+  if (!prev || !prev.trim() || prev === next) return false;
+  const key = norm(root) + '|' + file.toLowerCase();
+  const nextNames = featureNames(next || '');
+  const lost = featureNames(prev).some((n) => nextNames.indexOf(n) < 0);
+  const existing = listHistory(root, file);
+  const last = lastSnap.get(key) || (existing[0] ? existing[0].time : 0);
+  if (!force && !lost && Date.now() - last < HISTORY_GAP) return false;
+  if (existing[0] && readFileSync(join(historyDir(root), existing[0].name), 'utf8') === prev) return false;
+  mkdirSync(historyDir(root), { recursive: true });
+  writeFileSync(join(historyDir(root), Core.timeStamp() + '-' + file), prev);
+  pruneHistory(root, file);
+  lastSnap.set(key, Date.now());
+  return true;
+}
+
+// 每个已知文件夹里功能清单上次看到的内容：变了就把上一份存成历史版本
+const seenFeatures = new Map();
+
+function watchFeatures() {
+  const roots = new Set();
+  claudeFolders().forEach((x) => roots.add(resolve(x.path)));
+  history().forEach((x) => roots.add(resolve(x.path)));
+  roots.forEach((root) => {
+    planFiles(root).forEach((planFile) => {
+      const file = Core.featureFileFor(planFile);
+      const path = file ? join(root, file) : '';
+      if (!path || !existsSync(path)) return;
+      const text = readFileSync(path, 'utf8');
+      const key = norm(root) + '|' + file.toLowerCase();
+      const prev = seenFeatures.get(key);
+      if (prev !== undefined && prev !== text) snapshotFeatures(root, file, prev, text);
+      seenFeatures.set(key, text);
+    });
+  });
 }
 
 // 文件夹名里不能有这些字符，也不能以点或空格结尾
@@ -266,6 +315,16 @@ export function startServer() {
     try {
       const url = new URL(req.url, 'http://127.0.0.1');
       if (req.headers.host !== '127.0.0.1:' + port) { json(403, { error: 'host' }); return; }
+      // 书签方式加载进本机网页的悬浮窗要跨来源请求：只允许来自本机地址的网页，且仍然要口令
+      const origin = String(req.headers.origin || '');
+      if (url.pathname.indexOf('/api/') === 0 && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Headers', 'x-shupian-token, content-type');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Private-Network', 'true');
+      }
+      if (req.method === 'OPTIONS' && url.pathname.indexOf('/api/') === 0) { res.writeHead(204); res.end(); return; }
       if (url.pathname === '/api/pair' && req.method === 'POST') {
         // 只有扩展发来的请求（来源是扩展自己的地址）能拿到口令，网页拿不到
         if (!/^(chrome|moz)-extension:\/\//.test(String(req.headers.origin || ''))) { json(403, { error: 'origin' }); return; }
@@ -314,7 +373,9 @@ export function startServer() {
             const body = await readJsonBody();
             const b = BROWSERS.filter((x) => x.id === body.browser)[0];
             if (!b) { json(404, { error: 'browser' }); return; }
-            spawn(b.path, [b.page], { detached: true, stdio: 'ignore' }).unref();
+            // page 为 install 时打开本机服务提供的安装页（书签和扩展两种方式），否则打开浏览器自己的扩展页
+            const target = body.page === 'install' ? 'http://127.0.0.1:' + port + '/index.html?k=' + token + '&view=install' : b.page;
+            spawn(b.path, [target], { detached: true, stdio: 'ignore' }).unref();
             json(200, { ok: true });
             return;
           }
@@ -361,7 +422,15 @@ export function startServer() {
             const chunks = [];
             for await (const c of req) chunks.push(c);
             mkdirSync(dirname(file), { recursive: true });
+            const name = basename(file);
+            const isFeature = Core.FEATURE_FILE_RE.test(name) && dirname(file) === resolve(url.searchParams.get('root'));
+            const prevText = isFeature && existsSync(file) ? readFileSync(file, 'utf8') : '';
             writeFileSync(file, Buffer.concat(chunks));
+            if (isFeature) {
+              const text = readFileSync(file, 'utf8');
+              snapshotFeatures(url.searchParams.get('root'), name, prevText, text);
+              seenFeatures.set(norm(url.searchParams.get('root')) + '|' + name.toLowerCase(), text);
+            }
             const hm = HISTORY_NAME_RE.test(basename(file)) && basename(dirname(file)) === 'history' ? basename(file) : '';
             if (hm) pruneHistory(url.searchParams.get('root'), hm.slice(16));
             json(200, { ok: true });
@@ -392,6 +461,18 @@ export function startServer() {
       json(500, { error: String(e && e.message) });
     }
   });
+
+  const watcher = setInterval(() => {
+    try {
+      watchFeatures();
+      if (existsSync(WATCH_ERROR_FILE)) unlinkSync(WATCH_ERROR_FILE);
+    } catch (e) {
+      // 盯文件失败时历史版本就不会自动存，把原因留在固定的文件里
+      mkdirSync(STATE_DIR, { recursive: true });
+      writeFileSync(WATCH_ERROR_FILE, String(e && e.stack || e));
+    }
+  }, 3000);
+  watcher.unref();
 
   const idle = setInterval(() => {
     if (Date.now() - lastUse > IDLE_MS) process.exit(0);

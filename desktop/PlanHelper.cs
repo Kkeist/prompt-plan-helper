@@ -332,6 +332,8 @@ class Server
     // 历史版本在文件夹里的 .shupian/history/，名字是 时间-功能清单文件名.md，每份功能清单只留最近的 HistoryKeep 份
     const int HistoryKeep = 50;
     static readonly Regex HistoryNameRe = new Regex("^\\d{8}-\\d{6}-[^/\\\\:*?\"<>|]+\\.md$");
+    // 草稿：未提交的问题，文件夹里 .shupian/drafts/<计划书文件名>.json
+    static readonly Regex DraftNameRe = new Regex("^[^/\\\\:*?\"<>|]+\\.md\\.json$");
 
     // 计划书文件名对应的功能清单文件名；不是计划书的名字返回空字符串
     static string FeatureFileFor(string planFile)
@@ -346,6 +348,92 @@ class Server
         }
         return "";
     }
+
+    // 功能清单被改写之前的旧版本：页面、命令行、AI 直接改文件都一样处理（和 tools/app-server.mjs 一致）。
+    // 有功能被去掉时马上存，平时隔 HistoryGapMs 才存一份；和最新一份历史一样的不重复存；force 为真时不看间隔。
+    const int HistoryGapMs = 5 * 60 * 1000;
+    readonly Dictionary<string, DateTime> lastSnap = new Dictionary<string, DateTime>();
+    readonly Dictionary<string, string> seenFeatures = new Dictionary<string, string>();
+    readonly object snapLock = new object();
+
+    static List<string> FeatureNamesOf(string md)
+    {
+        var names = new List<string>();
+        var sec = "";
+        foreach (var l in md.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n'))
+        {
+            var m = Regex.Match(l, @"^(#{1,6})\s+(.*)$");
+            if (!m.Success) continue;
+            var level = m.Groups[1].Length;
+            if (level == 2)
+            {
+                var sm = Regex.Match(m.Groups[2].Value, @"^(\d+)\b");
+                sec = sm.Success ? sm.Groups[1].Value : "";
+            }
+            else if (level == 3 && sec == "4") names.Add(Regex.Replace(m.Groups[2].Value.Trim(), @"^\d+\.\d+\s*", ""));
+        }
+        return names;
+    }
+
+    bool SnapshotFeatures(string root, string file, string prev, string next, bool force)
+    {
+        if (string.IsNullOrWhiteSpace(prev) || prev == next) return false;
+        lock (snapLock)
+        {
+            var key = Path.GetFullPath(root).ToLowerInvariant() + "|" + file.ToLowerInvariant();
+            var nextNames = FeatureNamesOf(next ?? "");
+            var lost = FeatureNamesOf(prev).Any(n => !nextNames.Contains(n));
+            var existing = HistoryFiles(root, file);
+            DateTime last;
+            if (!lastSnap.TryGetValue(key, out last))
+                last = existing.Count > 0 ? File.GetLastWriteTime(Path.Combine(HistoryDir(root), existing[0])) : DateTime.MinValue;
+            if (!force && !lost && (DateTime.Now - last).TotalMilliseconds < HistoryGapMs) return false;
+            if (existing.Count > 0 && File.ReadAllText(Path.Combine(HistoryDir(root), existing[0]), Encoding.UTF8) == prev) return false;
+            Directory.CreateDirectory(HistoryDir(root));
+            File.WriteAllText(Path.Combine(HistoryDir(root), DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + file), prev, new UTF8Encoding(false));
+            foreach (var old in HistoryFiles(root, file).Skip(HistoryKeep)) File.Delete(Path.Combine(HistoryDir(root), old));
+            lastSnap[key] = DateTime.Now;
+            return true;
+        }
+    }
+
+    // 每个已知文件夹里功能清单上次看到的内容：变了就把上一份存成历史版本
+    int watching;
+
+    void WatchFeatures()
+    {
+        if (System.Threading.Interlocked.Exchange(ref watching, 1) == 1) return;
+        try
+        {
+            var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in ClaudeFolders()) roots.Add(Path.GetFullPath(f.path));
+            foreach (var h in History()) roots.Add(Path.GetFullPath(h.path));
+            foreach (var root in roots)
+            {
+                foreach (var plan in PlanFiles(root))
+                {
+                    var file = FeatureFileFor(plan);
+                    var path = file == "" ? "" : Path.Combine(root, file);
+                    if (path == "" || !File.Exists(path)) continue;
+                    var text = File.ReadAllText(path, Encoding.UTF8);
+                    var key = root.ToLowerInvariant() + "|" + file.ToLowerInvariant();
+                    string prev;
+                    bool had;
+                    lock (snapLock) { had = seenFeatures.TryGetValue(key, out prev); }
+                    if (had && prev != text) SnapshotFeatures(root, file, prev, text, false);
+                    lock (snapLock) { seenFeatures[key] = text; }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            // 盯文件失败时历史版本就不会自动存，把原因留在固定的文件里
+            try { Directory.CreateDirectory(StateDir); File.WriteAllText(Path.Combine(StateDir, "watch-error.txt"), e.ToString()); } catch (Exception) { }
+        }
+        finally { System.Threading.Interlocked.Exchange(ref watching, 0); }
+    }
+
+    System.Threading.Timer watcher;
 
     static string HistoryDir(string root) { return Path.Combine(Path.GetFullPath(root), ".shupian", "history"); }
 
@@ -481,6 +569,7 @@ class Server
         th.IsBackground = true;
         th.Start();
         WriteState();
+        watcher = new System.Threading.Timer(delegate { WatchFeatures(); }, null, 3000, 3000);
     }
 
     public void Stop()
@@ -538,6 +627,22 @@ class Server
             var url = ctx.Request.Url;
             if (ctx.Request.Headers["Host"] != "127.0.0.1:" + port) { SendJson(ctx, 403, new { error = "host" }); return; }
             var path = url.AbsolutePath;
+            // 书签方式加载进本机网页的悬浮窗要跨来源请求：只允许来自本机地址的网页，且仍然要口令
+            var origin0 = ctx.Request.Headers["Origin"] ?? "";
+            if (path.StartsWith("/api/") && Regex.IsMatch(origin0, @"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"))
+            {
+                ctx.Response.AddHeader("Access-Control-Allow-Origin", origin0);
+                ctx.Response.AddHeader("Vary", "Origin");
+                ctx.Response.AddHeader("Access-Control-Allow-Headers", "x-shupian-token, content-type");
+                ctx.Response.AddHeader("Access-Control-Allow-Methods", "GET, PUT, POST, OPTIONS");
+                ctx.Response.AddHeader("Access-Control-Allow-Private-Network", "true");
+            }
+            if (path.StartsWith("/api/") && ctx.Request.HttpMethod == "OPTIONS")
+            {
+                ctx.Response.StatusCode = 204;
+                ctx.Response.OutputStream.Close();
+                return;
+            }
             if (path == "/api/pair" && ctx.Request.HttpMethod == "POST")
             {
                 // 只有扩展发来的请求（来源是扩展自己的地址）能拿到口令，网页拿不到
@@ -620,7 +725,10 @@ class Server
                 var id = obj != null && obj.ContainsKey("browser") ? Convert.ToString(obj["browser"]) : "";
                 var b = Browsers().FirstOrDefault(x => x[0] == id);
                 if (b == null) { SendJson(ctx, 404, new { error = "browser" }); return; }
-                Process.Start(b[2], b[3]);
+                // page 为 install 时打开本机服务提供的安装页（书签和扩展两种方式），否则打开浏览器自己的扩展页
+                var page = obj != null && obj.ContainsKey("page") ? Convert.ToString(obj["page"]) : "";
+                var target = page == "install" ? "http://127.0.0.1:" + port + "/index.html?k=" + token + "&view=install" : b[3];
+                Process.Start(b[2], target);
                 SendJson(ctx, 200, new { ok = true });
                 return;
             }
@@ -680,12 +788,21 @@ class Server
             if (ctx.Request.HttpMethod == "PUT")
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(file));
-                File.WriteAllBytes(file, ReadBody(ctx));
                 var written = Path.GetFileName(file);
+                var putRoot = Query(url, "root");
+                // 功能清单被改写之前先存一份旧版本
+                var isFeature = FeatureFileRe.IsMatch(written) && string.Equals(Path.GetDirectoryName(file), Path.GetFullPath(putRoot), StringComparison.OrdinalIgnoreCase);
+                var prevText = isFeature && File.Exists(file) ? File.ReadAllText(file, Encoding.UTF8) : "";
+                File.WriteAllBytes(file, ReadBody(ctx));
+                if (isFeature)
+                {
+                    var text = File.ReadAllText(file, Encoding.UTF8);
+                    SnapshotFeatures(putRoot, written, prevText, text, false);
+                    lock (snapLock) { seenFeatures[Path.GetFullPath(putRoot).ToLowerInvariant() + "|" + written.ToLowerInvariant()] = text; }
+                }
                 if (HistoryNameRe.IsMatch(written) && Path.GetFileName(Path.GetDirectoryName(file)) == "history")
                 {
-                    var root = Query(url, "root");
-                    foreach (var old in HistoryFiles(root, written.Substring(16)).Skip(HistoryKeep)) File.Delete(Path.Combine(HistoryDir(root), old));
+                    foreach (var old in HistoryFiles(putRoot, written.Substring(16)).Skip(HistoryKeep)) File.Delete(Path.Combine(HistoryDir(putRoot), old));
                 }
                 SendJson(ctx, 200, new { ok = true });
                 return;
@@ -856,6 +973,8 @@ class Server
         if (PlanFileRe.IsMatch(rel) || FeatureFileRe.IsMatch(rel)) return Path.Combine(Path.GetFullPath(root), rel);
         const string historyPrefix = ".shupian/history/";
         if (rel.StartsWith(historyPrefix) && HistoryNameRe.IsMatch(rel.Substring(historyPrefix.Length))) return Path.Combine(HistoryDir(root), rel.Substring(historyPrefix.Length));
+        const string draftPrefix = ".shupian/drafts/";
+        if (rel.StartsWith(draftPrefix) && DraftNameRe.IsMatch(rel.Substring(draftPrefix.Length))) return Path.Combine(Path.GetFullPath(root), ".shupian", "drafts", rel.Substring(draftPrefix.Length));
         return null;
     }
 

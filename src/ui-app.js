@@ -148,7 +148,9 @@ function createApp(opts) {
     loadProject(cur.id);
     folderInit();
     // 有桌面服务时，窗口一打开先看最近的文件夹
-    if (SERVER && !opts.folder && (new URLSearchParams(location.search).get('view') === 'hub' || WINDOW_MODE)) {
+    if (SERVER && new URLSearchParams(location.search).get('view') === 'install') {
+      S.view = 'install';
+    } else if (SERVER && !opts.folder && (new URLSearchParams(location.search).get('view') === 'hub' || WINDOW_MODE)) {
       S.view = 'hub';
       // 还没写过内容、也没连文件夹的空项目不占标签
       if (!docs.plan.md.trim() && !S.project.path) {
@@ -670,7 +672,7 @@ function createApp(opts) {
   const featureNames = (md) => Core.progressList(md).map((x) => x.name);
 
   async function keepVersion(prev, next) {
-    if (!prev || !prev.trim() || prev === next || !S.folder.handle) return;
+    if (!prev || !prev.trim() || prev === next || !S.folder.handle || S.folder.handle.server) return;
     const lost = featureNames(prev).some((n) => featureNames(next).indexOf(n) < 0);
     if (!lost && Date.now() - historyAt < HISTORY_GAP) return;
     const name = Core.timeStamp() + '-' + featureFile();
@@ -1017,14 +1019,53 @@ function createApp(opts) {
     input.select();
   }
 
+  // 未提交的问题草稿：连了文件夹时存在文件夹里（悬浮窗读同一份），否则存在浏览器本地；写入按顺序排队
+  let draftChain = Promise.resolve();
+  let draftExists = false;
+
+  function draftHandle() {
+    return S.folder.state === 'ready' && S.folder.handle && S.folder.file ? S.folder.handle : null;
+  }
+
+  async function loadDraft() {
+    const handle = draftHandle();
+    if (!handle) return LS.get(NS + ':draft:' + S.project.id, []);
+    const text = await Folder.read(handle, Draft.sub, Draft.name(S.folder.file));
+    return text ? Draft.parse(text) : [];
+  }
+
+  function queueDraft(rows) {
+    if (!rows.length && !draftExists) return;
+    draftExists = rows.length > 0;
+    const handle = draftHandle();
+    const file = S.folder.file;
+    const key = NS + ':draft:' + S.project.id;
+    draftChain = draftChain.then(async () => {
+      if (handle) await Folder.write(handle, Draft.sub, Draft.name(file), Draft.text(rows));
+      else if (!LS.set(key, rows)) throw new Error(t('browser_storage_is_full_and_the_latest'));
+    }).catch((e) => toast(t('could_not_save_the_draft_why', { why: errText(e) })));
+  }
+
   // 项目情况：每个功能做什么、做到哪一步
-  // 写问题的小弹窗：问题记在某个功能下面；输入 @ 可以换功能
+  // 写问题的小弹窗：问题记在某个功能下面；输入 @ 可以换功能；没提交的内容留作草稿，下次打开还在
   function openIssue(featureLine) {
     const feats = Core.issueList(S.md);
     if (!feats.length) return;
     const first = feats.filter((f) => f.featureLine === featureLine)[0] || feats[0];
-    const list = createIssueList({ kit, features: () => feats, placeholder: t('describe_the_issue_you_can_several_features') });
+    let timer = 0;
+    const list = createIssueList({
+      kit,
+      features: () => feats,
+      placeholder: t('describe_the_issue_you_can_several_features'),
+      onChange() {
+        clearTimeout(timer);
+        timer = setTimeout(() => queueDraft(list.snapshot()), 500);
+      },
+    });
     list.reset(first);
+    loadDraft().then((rows) => {
+      if (rows.length && !list.items().length) { draftExists = true; list.restore(rows); }
+    }, (e) => toast(t('could_not_load_the_draft_why', { why: errText(e) })));
     kit.openModal({
       title: t('report_an_issue'),
       small: true,
@@ -1041,6 +1082,8 @@ function createApp(opts) {
           const r = Core.addIssues(S.md, flat, Core.today());
           if (!r.ok) { toast(t('write_the_issue_first')); return; }
           close();
+          clearTimeout(timer);
+          queueDraft([]);
           // 记问题、改进度不算改计划书
           commit(r.md, true);
           renderAll();
@@ -1564,6 +1607,15 @@ function createApp(opts) {
     head.append(h('div', { class: 'in tabs-in' }, renderTabs()));
   }
 
+  // 在别的浏览器里打开的安装页：书签和扩展两种方式
+  function renderInstallView() {
+    const box = h('div', { class: 'col' });
+    Api.call('GET', '/api/extension').then((info) => {
+      box.append(h('h2', { text: t('install_the_floating_window') }), installContent(kit, info));
+    }, (e) => toast(t('could_not_prepare_the_extension_why', { why: errText(e) })));
+    return box;
+  }
+
   function renderHubView() {
     const list = h('div', { class: 'folders' });
     folderRows(list, {
@@ -1585,7 +1637,9 @@ function createApp(opts) {
     kit.closePop();
     clear(body);
     let content;
-    if (S.view === 'hub') {
+    if (S.view === 'install') {
+      content = renderInstallView();
+    } else if (S.view === 'hub') {
       content = renderHubView();
     } else if (!S.md.trim()) {
       content = h('div', { class: 'col' }, h('div', { class: 'doc empty' },

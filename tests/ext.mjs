@@ -135,6 +135,32 @@ try {
   ok('两条问题各记到了自己的功能下', /关闭再打开没有回到设定值/.test(part41) && /完成轮数不加一/.test(part42) && !/完成轮数不加一/.test(part41), { part41: part41.slice(-160), part42: part42.slice(-160) });
   ok('记完之后只剩一个空行', (await w2('return r.querySelectorAll("textarea").length')) === 1 && (await w2('return r.querySelector("textarea").value')) === '');
 
+  // 没提交的内容存成草稿，放在项目文件夹里：别的页面里的悬浮窗和桌面窗口读同一份
+  const draftFile = join(proj, '.shupian', 'drafts', 'plan.md.json');
+  const readDraftText = () => { try { return readFileSync(draftFile, 'utf8'); } catch (e) { return ''; } };
+  await w2('var t=r.querySelector("textarea");t.focus();');
+  await page2.insert('草稿里的一句话');
+  let drafted = '';
+  for (let i = 0; i < 40 && !/草稿里的一句话/.test(drafted); i++) { await sleep(150); drafted = readDraftText(); }
+  ok('没提交的问题存进了文件夹里的草稿', /草稿里的一句话/.test(drafted), drafted);
+  const page5 = await chrome.newPage();
+  await page5.init(DEEP);
+  await page5.resize(1280, 800);
+  await page5.goto(base + 'tests/fixtures/plain.html');
+  await page5.sleep(600);
+  await page5.eval('window.postMessage({ shupian: "open" }, "*")');
+  const w5 = (js) => page5.eval('(function(){var r=document.querySelector("[data-shupian]").shadowRoot;' + js + '})()');
+  let restored = '';
+  for (let i = 0; i < 60 && restored !== '草稿里的一句话'; i++) {
+    await page5.sleep(150);
+    restored = await w5('var t=r.querySelector("textarea");return t?t.value:""');
+  }
+  ok('另一个页面里的悬浮窗打开后，草稿还在', restored === '草稿里的一句话', restored);
+  await w5('var t=r.querySelector("textarea");t.value="";t.dispatchEvent(new Event("input",{bubbles:true}))');
+  let cleared = '';
+  for (let i = 0; i < 40 && !/"rows":\[\]/.test(cleared); i++) { await sleep(150); cleared = readDraftText(); }
+  ok('清空之后草稿也清空', /"rows":\[\]/.test(cleared), cleared);
+
   // 页面自己引入了脚本又装了扩展：只留一份悬浮窗，并且是能连桌面小窗口的那份
   const page3 = await chrome.newPage();
   await page3.init(DEEP);

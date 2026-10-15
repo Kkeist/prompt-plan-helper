@@ -139,11 +139,31 @@ const Api = {
   },
 };
 
-// 悬浮窗到桌面服务的通道：只在浏览器扩展里可用，端口和口令由扩展后台持有，页面里拿不到
+// 书签方式：脚本是被书签从本机服务加载进来的，地址里带着服务的来源和口令（只用于本机网页）
+const BOOKMARK = (function () {
+  const el = document.currentScript;
+  if (!el || !el.src) return null;
+  try {
+    const u = new URL(el.src);
+    const k = u.searchParams.get('k') || '';
+    if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && /^[0-9a-f]{8,}$/.test(k) && /\/shupian\.js$/.test(u.pathname)) return { origin: u.origin, token: k };
+  } catch (e) { /* 地址不是标准网址就不是书签加载的 */ }
+  return null;
+})();
+
+// 悬浮窗到桌面服务的通道：在浏览器扩展里由扩展后台持有端口和口令；书签方式下直接请求脚本来源的服务
 const Link = {
-  available: typeof chrome !== 'undefined' && !!(chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage),
+  available: !!BOOKMARK || (typeof chrome !== 'undefined' && !!(chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage)),
   // 失败时抛出的错误 message：unpaired（还没有打开过桌面小窗口）、down（服务没有响应）、或接口的状态码
   call(method, path, body) {
+    if (BOOKMARK) {
+      const headers = { 'x-shupian-token': BOOKMARK.token };
+      let payload = body;
+      if (body !== undefined && typeof body !== 'string') { headers['content-type'] = 'application/json'; payload = JSON.stringify(body); }
+      return fetch(BOOKMARK.origin + path, { method, headers, body: payload }).then(
+        (r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); },
+        () => { throw new Error('down'); });
+    }
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({ shupian: 'api', method, path, body }, (r) => {
         if (chrome.runtime.lastError || !r) { reject(new Error('down')); return; }
@@ -239,6 +259,18 @@ const Folder = {
     const d = await Folder.dir(handle, ['.shupian', 'history'], false);
     for (const it of all.slice(keep)) await d.removeEntry(it.name);
   },
+};
+
+// 未提交的问题草稿：项目文件夹里 .shupian/drafts/<计划书文件名>.json；桌面窗口和页面上的悬浮窗读写同一份
+const Draft = {
+  sub: ['.shupian', 'drafts'],
+  name: (file) => file + '.json',
+  rel: (file) => '.shupian/drafts/' + file + '.json',
+  parse(text) {
+    const j = JSON.parse(text);
+    return Array.isArray(j.rows) ? j.rows : [];
+  },
+  text: (rows) => JSON.stringify({ rows }),
 };
 
 // ---------- 下载和复制 ----------

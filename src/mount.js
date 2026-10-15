@@ -204,7 +204,11 @@ function mountFloat(autoOpen) {
 }
 
 (function boot() {
-  if (window.Shupian) return;
+  // 书签方式下再点一次，悬浮窗开或收
+  if (window.Shupian) {
+    if (BOOKMARK && typeof window.Shupian.toggle === 'function') window.Shupian.toggle();
+    return;
+  }
   const params = new URLSearchParams(location.search);
   const want = params.get('shupian') || (location.hash.indexOf('#shupian-') === 0 ? location.hash.slice(9) : '');
   const start = () => {

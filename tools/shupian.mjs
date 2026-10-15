@@ -2,13 +2,14 @@
 // 用法：
 //   node tools/shupian.mjs check [计划书文件]                 状态、待补列表、重名检查
 //   node tools/shupian.mjs progress [计划书文件或功能清单文件] [功能名 todo|doing|done]   查看或更新进度（记在功能清单里）
+//   node tools/shupian.mjs snapshot [计划书文件]              把功能清单当前的内容存成一份历史版本（直接改文件之前先运行）
 //   node tools/shupian.mjs app [hub|plan]                    打开桌面窗口（最近的文件夹，或计划书）
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STATE_FILE } from './app-server.mjs';
+import { STATE_FILE, snapshotFeatures } from './app-server.mjs';
 import { T, locales } from './text.mjs';
 
 const require = createRequire(import.meta.url);
@@ -42,6 +43,22 @@ function loadWork(arg) {
   if (existsSync(path)) return { path, md: readFileSync(path, 'utf8') };
   if (Core.getStatus(plan.md) === 'approved') return { path, md: Core.makeFeatureList(plan.md) };
   return plan;
+}
+
+// 写功能清单之前先把旧的一份存进历史版本
+function writeWork(path, prev, next) {
+  if (Core.FEATURE_FILE_RE.test(basename(path)) && existsSync(path)) snapshotFeatures(dirname(path), basename(path), prev, next);
+  writeFileSync(path, next);
+}
+
+function snapshot(args) {
+  const { path, md } = loadWork(args[0]);
+  if (!Core.FEATURE_FILE_RE.test(basename(path)) || !existsSync(path)) {
+    console.error(T('no_feature_list_yet'));
+    process.exit(2);
+  }
+  const saved = snapshotFeatures(dirname(path), basename(path), md, '', true);
+  console.log(saved ? T('snapshot_saved') : T('snapshot_not_needed'));
 }
 
 function check(arg) {
@@ -89,7 +106,7 @@ function progress(args) {
     console.error(T('no_such_feature', { name }));
     process.exit(2);
   }
-  writeFileSync(path, Core.setProgress(md, hit.line, status));
+  writeWork(path, md, Core.setProgress(md, hit.line, status));
   console.log(T('progress_updated', { name: hit.name, status }));
 }
 
@@ -121,7 +138,7 @@ function issue(args) {
   const { path, md } = loadWork(file);
   const row = issueRows(md)[n - 1];
   if (!row) { console.error(T('no_such_issue', { n: rest[0] })); process.exit(2); }
-  writeFileSync(path, Core.setIssueState(md, row.line, state));
+  writeWork(path, md, Core.setIssueState(md, row.line, state));
   console.log(T('issue_updated', { n, state: issueNames()[state] }));
 }
 
@@ -219,6 +236,7 @@ if (cmd === 'check') check(args[0]);
 else if (cmd === 'progress') progress(args);
 else if (cmd === 'issues') issues(args);
 else if (cmd === 'issue') issue(args);
+else if (cmd === 'snapshot') snapshot(args);
 else if (cmd === 'app') app(args[0]).then(() => process.exit(0));
 else {
   console.log(T('usage'));

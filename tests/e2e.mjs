@@ -132,6 +132,16 @@ try {
   ok('没有虚线', !(await page.eval('(function(){var bad=0;__deep("*").forEach(function(e){var cs=getComputedStyle(e);if(/dashed|dotted/.test(cs.borderTopStyle+cs.borderBottomStyle+cs.borderLeftStyle+cs.borderRightStyle+cs.textDecorationStyle))bad++});return bad})()')));
   await page.shot(join(shots, '02-项目情况-1280.png'));
 
+  console.log('导出（下载）：文件名带日期时间，内容是计划书，可以再导入');
+  await page.eval('(function(){window.__dl=[];var c=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download){var a=this;fetch(a.href).then(function(r){return r.text()}).then(function(x){window.__dl.push({name:a.download,text:x})})}else c.call(this)}})()');
+  await page.click(btn('⋯'));
+  await page.sleep(150);
+  await page.click(btn('导出'));
+  await page.sleep(400);
+  const dl = JSON.parse(await page.eval('JSON.stringify(window.__dl)'));
+  ok('导出了一个 md 文件，名字带日期时间', dl.length === 1 && /^.+-\d{8}-\d{6}\.md$/.test(dl[0].name), dl.map((x) => x.name));
+  ok('导出的内容是这份计划书', dl.length === 1 && /番茄钟/.test(dl[0].text) && /### 4\.2/.test(dl[0].text), dl.length ? dl[0].text.slice(0, 60) : '');
+
   console.log('标签页和语言下拉');
   ok('有一个项目标签', (await H.count('.tabbar .tab')) === 1);
   await page.click(Q('.tabbar .chip.add'));
@@ -274,6 +284,27 @@ try {
   ok('再点：变成已修，并留在列表里', await H.exists('.issue.done .istate', '✓ 已修', true) && (await H.count('.issue')) === 1);
   ok('已修的不再算未处理', !/未处理的问题/.test((await H.text('.status-head .muted')) || ''));
 
+  console.log('写问题的小弹窗：没提交的内容留作草稿');
+  await page.click(Q('.status-row .btn.sm', '＋'));
+  await page.click(Q('.modal.small textarea'));
+  await page.insert('草稿里的一句话');
+  await page.sleep(800);
+  await page.click(Q('.modal-foot button', '取消', true));
+  await page.sleep(200);
+  ok('取消后弹窗关闭', !(await H.exists('.modal.small')));
+  await page.click(Q('.status-row .btn.sm', '＋'));
+  await page.sleep(500);
+  ok('再打开：没提交的内容还在', (await page.eval('__deep(".modal.small textarea")[0].value')) === '草稿里的一句话', await page.eval('__deep(".modal.small textarea")[0].value'));
+  await page.eval('(function(){var ta=__deep(".modal.small textarea")[0];ta.value="";ta.dispatchEvent(new Event("input",{bubbles:true}));})()');
+  await page.sleep(800);
+  await page.click(Q('.modal-foot button', '取消', true));
+  await page.sleep(200);
+  await page.click(Q('.status-row .btn.sm', '＋'));
+  await page.sleep(500);
+  ok('清空之后再打开是空的', (await page.eval('__deep(".modal.small textarea")[0].value')) === '');
+  await page.click(Q('.modal-foot button', '取消', true));
+  await page.sleep(200);
+
   console.log('写问题的小弹窗：用列表一次写多条');
   await page.click(Q('.status-row .btn.sm', '＋'));
   await page.click(Q('.modal.small textarea'));
@@ -391,9 +422,24 @@ try {
   const extPath = await HW.text('.modal .fpath');
   ok('安装弹窗：四步说明和扩展文件夹地址', (await win.eval('__deep(".modal .steps li").length')) === 4 && /extension$/.test(extPath || ''), extPath);
   ok('扩展文件夹里有清单和脚本', existsSync(join(extPath || '.', 'manifest.json')) && existsSync(join(extPath || '.', 'shupian.js')), extPath);
+  const bmHref = await win.eval('(function(){var a=__one(".modal .bookmarklet");return a?a.getAttribute("href"):""})()');
+  ok('安装弹窗里有可以拖到书签栏的书签，指向本机服务的脚本', /^javascript:/.test(bmHref) && /shupian\.js\?k=[0-9a-f]+/.test(bmHref), bmHref.slice(0, 120));
   await win.shot(join(shots, '05b-安装扩展弹窗-420.png'));
   await win.key('Escape');
   await win.sleep(100);
+  // 在别的浏览器里打开的安装页：书签和扩展两种方式
+  const inst = await chrome.newPage();
+  await inst.init(DEEP);
+  await inst.resize(900, 800);
+  const HI = helpers(inst);
+  await inst.goto('http://127.0.0.1:' + srvInfo.port + '/index.html?k=' + srvInfo.token + '&view=install');
+  await HI.wait(async () => HI.exists('.bookmarklet'), 40);
+  ok('安装页：书签和浏览器扩展两种方式', (await HI.count('.ext-block')) === 2 && (await HI.exists('h2', '安装悬浮窗', true)), await HI.text('.col'));
+  await inst.shot(join(shots, '05c-安装页-900.png'));
+  // 新开的页面会抢走前台，原来的窗口变成后台页：定时器被限速、截图卡住。关掉它，再把桌面窗口放回前台
+  await inst.send('Page.close');
+  inst.close();
+  await win.send('Page.bringToFront');
   ok('先显示「最近」标签', await HW.exists('.tabbar .chip.on', '最近', true));
   ok('列出最近在用的文件夹', await HW.exists('.frow .fname', '番茄钟项目'), await win.eval('__one(".folders") && __one(".folders").textContent'));
   ok('标出「使用中」', await HW.exists('.badge', '使用中'));
@@ -419,6 +465,12 @@ try {
   ok('磁盘上的计划书被改了，页面自动更新', /已完成 1 \/ 2/.test((await HW.text('.status-head .muted')) || '') && Date.now() - t1 < 7000, Date.now() - t1);
   const bad = await win.eval('fetch("/api/file?root=" + encodeURIComponent("C:\\\\Windows") + "&p=plan.md", { headers: { "x-shupian-token": "' + srvInfo.token + '" } }).then(function(r){return r.status})');
   ok('服务不读未知文件夹', bad === 400, bad);
+  const draftUrl = (name) => '"/api/file?root=" + encodeURIComponent(' + JSON.stringify(projDir) + ') + "&p=" + encodeURIComponent(' + JSON.stringify(name) + ')';
+  const draftPut = await win.eval('fetch(' + draftUrl('.shupian/drafts/plan.md.json') + ', { method: "PUT", headers: { "x-shupian-token": "' + srvInfo.token + '" }, body: JSON.stringify({ rows: [{ text: "草稿", fs: [] }] }) }).then(function(r){return r.status})');
+  ok('服务接受草稿文件', draftPut === 200 && existsSync(join(projDir, '.shupian', 'drafts', 'plan.md.json')), draftPut);
+  const draftBad = await win.eval('fetch(' + draftUrl('.shupian/drafts/other.txt') + ', { method: "PUT", headers: { "x-shupian-token": "' + srvInfo.token + '" }, body: "x" }).then(function(r){return r.status})');
+  ok('服务不接受草稿目录里的其他文件', draftBad === 400, draftBad);
+  rmSync(join(projDir, '.shupian', 'drafts'), { recursive: true, force: true });
   const noTok = await win.eval('fetch("/api/projects").then(function(r){return r.status})');
   ok('没有口令的接口请求被拒绝', noTok === 401, noTok);
   await win.shot(join(shots, '06-桌面打开计划书-420.png'));

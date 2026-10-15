@@ -1,7 +1,7 @@
 // 桌面版自测：node tests/exe.mjs
 // 用临时的用户目录启动 exe 和 Node 版本服务，对同一份数据调用接口，检查两边结果一致。
 import { request as httpRequest } from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -33,6 +33,19 @@ let exeInfo = null;
 for (let i = 0; i < 50 && !exeInfo; i++) {
   await sleep(150);
   try { const j = JSON.parse(readFileSync(stateFile, 'utf8')); if (j.port === 14611) exeInfo = j; } catch (e) { /* 还没写出来 */ }
+}
+
+// 预检请求：返回状态和允许的来源
+function corsAsk(info, origin) {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: '127.0.0.1', port: info.port, path: '/api/projects', method: 'OPTIONS',
+      headers: { origin, 'access-control-request-method': 'GET', 'access-control-request-headers': 'x-shupian-token' } }, (res) => {
+      res.resume();
+      res.on('end', () => resolve({ status: res.statusCode, allow: res.headers['access-control-allow-origin'] || '' }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 // 带来源头发请求（fetch 不让页面脚本设置 Origin，这里用 http 模块）
@@ -96,6 +109,10 @@ try {
     const extDir = ext.json && ext.json.path;
     ok(label + '：扩展文件放到了固定的文件夹', !!extDir && extDir.startsWith(home) && existsSync(join(extDir, 'manifest.json')) && existsSync(join(extDir, 'background.js')) && existsSync(join(extDir, 'icons', '128.png')), ext.text.slice(0, 160));
     ok(label + '：扩展脚本和网页里的是同一份', !!extDir && readFileSync(join(extDir, 'shupian.js'), 'utf8') === readFileSync(join(root, 'web', 'shupian.js'), 'utf8'));
+    const localOk = await corsAsk(info, 'http://localhost:3000');
+    const otherNo = await corsAsk(info, 'https://example.com');
+    ok(label + '：本机网页的预检请求通过，别的网站不给允许来源', localOk.status === 204 && localOk.allow === 'http://localhost:3000' && otherNo.status === 204 && otherNo.allow === '', [localOk, otherNo]);
+    ok(label + '：扩展接口的安装页参数：不认识的浏览器被拒绝', (await post('/api/extension', { browser: 'nothing', page: 'install' })).status === 404);
     ok(label + '：扩展接口列出浏览器，不认识的浏览器被拒绝', Array.isArray(ext.json.browsers) && (await post('/api/extension', { browser: 'nothing' })).status === 404, ext.text.slice(0, 160));
     const r = await post('/api/mkdir', { parent: proj, name: made });
     ok(label + '：新建文件夹', r.status === 200 && existsSync(join(proj, made)) && r.json.name === made, r.text.slice(0, 120));
@@ -146,14 +163,37 @@ try {
     ok(label + '：计划书文件没有被改', readFileSync(join(proj, 'plan.md'), 'utf8') === planMd);
     ok(label + '：别的文件名被拒绝', (await put('notes.md', 'x')).status === 400 && (await get('../features.md')).status === 400);
 
+    // 谁改了功能清单（这里模拟 AI 直接改文件）都在改写前存一份旧版本
+    const removed = features.replace(['### 4.3 导出分享', '', '进度：未做', ''].join('\n'), '');
+    writeFileSync(join(proj, 'features.md'), removed);
+    let saved = null;
+    for (let i = 0; i < 60 && !saved; i++) {
+      await sleep(250);
+      const l = await call(info, '/api/history?root=' + encodeURIComponent(proj) + '&file=features.md');
+      const first = l.json && l.json.items && l.json.items[0];
+      if (first) {
+        const t = await get('.shupian/history/' + first.name);
+        if (t.json && t.json.text === features) saved = first.name;
+      }
+    }
+    ok(label + '：直接改文件去掉了功能，旧版本自动存进历史', !!saved && removed !== features, saved);
+    const cli = spawnSync(process.execPath, [join(root, 'tools', 'shupian.mjs'), 'snapshot', 'plan.md'], { cwd: proj, env, encoding: 'utf8' });
+    ok(label + '：命令行 snapshot 把当前功能清单存成历史版本', cli.status === 0 && /历史版本/.test(cli.stdout), [cli.status, cli.stdout, cli.stderr]);
+    await put('features.md', features);
+
     const hist = (n) => '.shupian/history/' + n;
     const first = await put(hist('20260101-000001-features.md'), '旧版本一');
     ok(label + '：历史版本可以写进 .shupian/history', first.status === 200 && existsSync(join(proj, '.shupian', 'history', '20260101-000001-features.md')));
     ok(label + '：历史版本的名字不合格被拒绝', (await put(hist('bad.md'), 'x')).status === 400 && (await put('.shupian/other.md', 'x')).status === 400 && (await put('.shupian/history/../x.md', 'x')).status === 400);
+    const draft = await put('.shupian/drafts/features.md.json', '{"rows":[]}');
+    const draftBack = await get('.shupian/drafts/features.md.json');
+    ok(label + '：草稿可以写进 .shupian/drafts 并读回', draft.status === 200 && draftBack.json && draftBack.json.exists === true && draftBack.json.text === '{"rows":[]}');
+    ok(label + '：草稿目录里名字不合格的被拒绝', (await put('.shupian/drafts/x.txt', 'x')).status === 400 && (await put('.shupian/drafts/../x.md.json', 'x')).status === 400);
     for (let i = 2; i <= 55; i++) await put(hist('20260101-0000' + String(i).padStart(2, '0') + '-features.md'), '旧版本' + i);
     const list = await call(info, '/api/history?root=' + encodeURIComponent(proj) + '&file=features.md');
     const names = (list.json && list.json.items || []).map((x) => x.name);
-    ok(label + '：每份功能清单只留最近的 50 份历史，最新的在前', names.length === 50 && names[0] === '20260101-000055-features.md' && names[49] === '20260101-000006-features.md', [names.length, names[0], names[names.length - 1]]);
+    const mine = names.filter((n) => n.indexOf('20260101-') === 0);
+    ok(label + '：每份功能清单只留最近的 50 份历史，最新的在前', names.length === 50 && mine[0] === '20260101-000055-features.md' && names.indexOf(mine[0]) === names.length - mine.length, [names.length, mine.length, names[0], names[names.length - 1]]);
     ok(label + '：历史列表只认功能清单文件名', (await call(info, '/api/history?root=' + encodeURIComponent(proj) + '&file=plan.md')).status === 400);
     const old = await get(hist('20260101-000055-features.md'));
     ok(label + '：可以读回历史版本', old.json && old.json.exists === true && old.json.text === '旧版本55');

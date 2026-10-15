@@ -87,8 +87,10 @@ function createKit(appEl) {
 // 列表式写问题：点「＋ 加一条」或回车加一条，每一条是一个输入框，随时可以改、可以补。
 // 每一条可以 @ 多个功能（点「＋ @」或输入 @），行里的 data 留给调用方放自己的东西（比如选取的多个元素）。
 // o: { kit, features: () => [{ no, name }]（可以没有功能，那就没有 @）, placeholder（文字或函数）, onTarget(f),
-//      rowTools(row, repaint)（每条上方的额外按钮）, rowExtra(row, repaint)（每条下方的额外内容）, onLayout() }
-// 返回 { el, rows, items(), focusedRow(), syncTargets(f), reset(f), addRow(f), paint(), defaultF }
+//      rowTools(row, repaint)（每条上方的额外按钮）, rowExtra(row, repaint)（每条下方的额外内容）, onLayout(),
+//      onChange()（用户改了内容；程序自己的 reset / restore / syncTargets 不触发） }
+// 返回 { el, rows, items(), focusedRow(), syncTargets(f), reset(f), addRow(f), paint(), defaultF,
+//        snapshot()（有内容的行，可存成 JSON）, restore(rows)（取回草稿，返回有没有取回） }
 function createIssueList(o) {
   const el = h('div', { class: 'ilist' });
   const rows = [];
@@ -98,6 +100,9 @@ function createIssueList(o) {
   const has = (row, f) => row.fs.some((x) => same(x, f));
   const api = { el, rows, defaultF: null };
   let focused = null;
+  // 用户改动（输入、加减行、选功能、加元素）之后通知调用方保存草稿；程序自己重画不通知
+  let quiet = false;
+  const changed = () => { if (!quiet && o.onChange) o.onChange(); };
 
   // 勾选或取消勾选一个功能；下拉保持打开，可以连着选多个
   function choose(row, anchor, after) {
@@ -131,6 +136,7 @@ function createIssueList(o) {
         row.text = ta.value;
         choose(row, ta);
       }
+      changed();
     });
     ta.addEventListener('keydown', (e) => {
       if (e.isComposing) return;
@@ -182,9 +188,13 @@ function createIssueList(o) {
     el.append(h('button', { type: 'button', class: 'btn sm add-row', onclick() { add(api.defaultF ? [api.defaultF] : []); } }, '＋ ' + t('add_an_issue')));
     setTimeout(() => growAll(el), 0);
     if (o.onLayout) o.onLayout();
+    changed();
   }
 
-  api.items = () => rows.filter((r) => r.text.trim()).map((r) => ({ fs: r.fs.slice(), text: r.text.trim(), data: r.data }));
+  // 程序自己改列表时不当作用户改动
+  const silently = (fn) => { quiet = true; try { fn(); } finally { quiet = false; } };
+
+  api.items =() => rows.filter((r) => r.text.trim()).map((r) => ({ fs: r.fs.slice(), text: r.text.trim(), data: r.data }));
   api.focusedRow = () => (focused && rows.indexOf(focused) >= 0 ? focused : rows[rows.length - 1]);
   // 功能列表更新（比如换了计划书）：行里的功能按名字对回去，对不上的去掉；没有功能的行补上 f
   api.syncTargets = (f) => {
@@ -194,13 +204,34 @@ function createIssueList(o) {
       r.fs = r.fs.map((x) => list.filter((y) => same(x, y))[0]).filter(Boolean);
       if (!r.fs.length && f) r.fs = [f];
     });
-    paint();
+    silently(paint);
   };
   api.reset = (f) => {
     rows.length = 0;
     api.defaultF = f || null;
     rows.push(makeRow(f ? [f] : []));
-    paint();
+    silently(paint);
+  };
+  // 草稿：只存有内容的行；功能按编号和名字存，取回时对回当前的功能列表，对不上的去掉
+  api.snapshot = () => rows.filter((r) => r.text.trim()).map((r) => ({
+    text: r.text,
+    fs: r.fs.map((f) => ({ no: f.no, name: f.name })),
+    data: r.data,
+  }));
+  api.restore = (saved) => {
+    const list = feats();
+    const keep = (Array.isArray(saved) ? saved : []).filter((x) => x && typeof x.text === 'string' && x.text.trim());
+    if (!keep.length) return false;
+    const defaults = api.defaultF ? [api.defaultF] : [];
+    rows.length = 0;
+    keep.forEach((x) => {
+      const fs = (x.fs || []).map((f) => list.filter((y) => same(f, y))[0]).filter(Boolean);
+      const row = makeRow(fs.length ? fs : defaults, x.text);
+      row.data = x.data && typeof x.data === 'object' ? x.data : {};
+      rows.push(row);
+    });
+    silently(paint);
+    return true;
   };
   api.addRow = (f) => add(f ? [f] : []);
   api.paint = paint;
