@@ -265,7 +265,6 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .lang:hover { background: var(--hover); }
 .menu-link { display: block; padding: 0.4em 0.75em; color: var(--ink); text-decoration: none; border-radius: 0.4em; }
 .menu-link:hover { background: var(--hover); }
-.cli-hint { font-size: 0.8em; text-align: center; }
 
 /* 功能清单：问题和小弹窗 */
 .modal.small { max-width: 24em; }

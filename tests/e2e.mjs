@@ -212,7 +212,7 @@ try {
   ok('标出「使用中」', await HW.exists('.badge', '使用中'));
   ok('显示完整地址', (await HW.text('.fpath')) === projDir, await HW.text('.fpath'));
   ok('显示进度摘要', /已完成 1 \/ 2，待补 0 处/.test((await HW.text('.frow .muted')) || ''), await HW.text('.frow .muted'));
-  ok('复制地址旁写着「方便打开 CLI」', await HW.exists('.frow .cli-hint', '方便打开 CLI'));
+  ok('最近里只写「复制地址」，不写「方便打开 CLI」', (await HW.exists('.frow button', '复制地址', true)) && !/方便打开 CLI/.test(await win.eval('__one(".frow").textContent')));
   ok('界面里没有 Claude 字样', !/Claude/.test(await win.eval('__one(".app").textContent')));
   const sizeAtOpen = JSON.stringify(await win.eval('window.__sizeCalls'));
   ok('打开时只设置一次小窗口大小和位置', /^\[\["resize",360,480\],\["move",\d+,\d+\]\]$/.test(sizeAtOpen), sizeAtOpen);

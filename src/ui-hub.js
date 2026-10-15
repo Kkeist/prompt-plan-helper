@@ -17,8 +17,7 @@ function folderRows(container, o) {
       return h('div', { class: 'frow' + (isCur ? ' cur' : '') }, info,
         h('div', { class: 'factions' },
           h('button', { type: 'button', class: 'btn sm primary', onclick: () => o.onPick(x.path) }, isCur ? t('当前') : t('打开计划书')),
-          h('button', { type: 'button', class: 'btn sm', title: t('方便打开 CLI'), onclick: () => copyThen(o.kit, x.path) }, t('复制地址')),
-          h('span', { class: 'muted cli-hint', text: t('方便打开 CLI') })));
+          h('button', { type: 'button', class: 'btn sm', onclick: () => copyThen(o.kit, x.path) }, t('复制地址'))));
     };
     const section = (title, list) => {
       if (!list.length) return;
