@@ -67,7 +67,7 @@ async function openExtensionHelp(kit) {
     return;
   }
   const openPage = (b) => Api.call('POST', '/api/extension', { browser: b.id }).catch((e) => kit.toast(t('could_not_open_the_extensions_page_why', { why: errText(e) })));
-  const steps = [t('extension_step_open'), t('extension_step_load'), t('extension_step_done')].map((x) => h('li', { text: x }));
+  const steps = [t('extension_step_open'), t('extension_step_load'), t('extension_step_done'), t('extension_step_button')].map((x) => h('li', { text: x }));
   kit.openModal({
     title: t('install_the_browser_extension'),
     body: h('div', null,

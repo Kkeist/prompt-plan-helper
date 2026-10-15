@@ -321,8 +321,9 @@ try {
   await win.click(Q('.extrow button', '安装浏览器扩展', true));
   await HW.wait(async () => HW.exists('.modal .steps'), 40);
   const extPath = await HW.text('.modal .fpath');
-  ok('安装弹窗：三步说明和扩展文件夹地址', (await win.eval('__deep(".modal .steps li").length')) === 3 && /extension$/.test(extPath || ''), extPath);
+  ok('安装弹窗：四步说明和扩展文件夹地址', (await win.eval('__deep(".modal .steps li").length')) === 4 && /extension$/.test(extPath || ''), extPath);
   ok('扩展文件夹里有清单和脚本', existsSync(join(extPath || '.', 'manifest.json')) && existsSync(join(extPath || '.', 'shupian.js')), extPath);
+  await win.shot(join(shots, '05b-安装扩展弹窗-420.png'));
   await win.key('Escape');
   await win.sleep(100);
   ok('先显示「最近」标签', await HW.exists('.tabbar .chip.on', '最近', true));
