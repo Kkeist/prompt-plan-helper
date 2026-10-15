@@ -66,9 +66,6 @@ test('页面、功能、东西、情况结构：中文和英文一致', () => {
     assert.equal(s.widgets.length, 5);
     assert.equal(s.cases.length, 5);
   }
-  const pos = Core.positions(timerEn);
-  assert.ok(pos.some((p) => p.kind === 'feature' && /Feature 4\.1 Countdown/.test(p.label)));
-  assert.ok(pos.some((p) => p.kind === 'widget' && /Timer page › Start button/.test(p.label)));
   const a = Core.structure(exampleZh);
   const b = Core.structure(exampleEn);
   assert.equal(a.pages.length, b.pages.length);
@@ -204,4 +201,22 @@ test('给 AI 的话：中英文都带格式，不要求用户写做法', () => {
   assert.match(p, /做一个计时器/);
   assert.match(p, /我不懂代码/);
   assert.match(Core.buildAiPrompt('', schema, 'a timer', 'en'), /I do not know code/);
+});
+
+test('问题：一次加多条，分散在不同功能，顺序和行号都对', () => {
+  const feats = Core.issueList(timerZh);
+  assert.equal(feats.length, 2);
+  const items = [
+    { featureLine: feats[1].featureLine, text: '第二个功能的问题' },
+    { featureLine: feats[0].featureLine, text: '第一个功能的问题甲' },
+    { featureLine: feats[0].featureLine, text: '   ' },
+    { featureLine: feats[0].featureLine, text: '第一个功能的问题乙' },
+  ];
+  const r = Core.addIssues(timerZh, items, '2026-01-05');
+  assert.equal(r.ok, true);
+  assert.equal(r.added, 3);
+  const after = Core.issueList(r.md);
+  assert.deepEqual(after[0].items.map((x) => x.text.replace(/（.*）$/, '')), ['第一个功能的问题甲', '第一个功能的问题乙']);
+  assert.deepEqual(after[1].items.map((x) => x.text.replace(/（.*）$/, '')), ['第二个功能的问题']);
+  assert.equal(Core.addIssues(timerZh, [{ featureLine: feats[0].featureLine, text: '' }], '2026-01-05').ok, false);
 });

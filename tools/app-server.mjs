@@ -53,13 +53,44 @@ function claudeFolders() {
   return out.sort((a, b) => b.last - a.last).slice(0, 20);
 }
 
-function planFileIn(root) {
-  return PLAN_NAMES.filter((n) => existsSync(join(root, n)))[0] || '';
+// 计划书文件：plan.md、计划书.md，以及同一个文件夹里的多份：plan-名称.md、计划书-名称.md
+const PLAN_FILE_RE = /^(?:plan|计划书)(?:-[^\\/:*?"<>|]{1,60})?\.md$/i;
+const CURRENT_FILE = join(STATE_DIR, 'current.json');
+
+function planFiles(root) {
+  const have = existsSync(root) ? readdirSync(root).filter((n) => PLAN_FILE_RE.test(n) && statSync(join(root, n)).isFile()) : [];
+  const first = PLAN_NAMES.filter((n) => have.indexOf(n) >= 0);
+  return first.concat(have.filter((n) => first.indexOf(n) < 0).sort());
 }
 
-function summary(root) {
-  const file = planFileIn(root);
-  if (!file) return null;
+// 每个文件夹里当前用哪一份，以及最后打开的是哪一份
+function readCurrent() {
+  const j = readJson(CURRENT_FILE, {});
+  return { files: j.files || {}, last: j.last || null };
+}
+
+function currentFile(root) {
+  const list = planFiles(root);
+  const want = readCurrent().files[norm(root)];
+  return (want && list.indexOf(want) >= 0 ? want : list[0]) || '';
+}
+
+function setCurrent(root, file) {
+  const cur = readCurrent();
+  cur.files[norm(root)] = file;
+  cur.last = { path: resolve(root), file };
+  mkdirSync(STATE_DIR, { recursive: true });
+  writeFileSync(CURRENT_FILE, JSON.stringify(cur));
+}
+
+// file 不给就取当前这一份
+function summary(root, file) {
+  const name = file || currentFile(root);
+  if (!name) return null;
+  return summaryOf(root, name);
+}
+
+function summaryOf(root, file) {
   const md = readFileSync(join(root, file), 'utf8');
   const list = Core.progressList(md);
   return {
@@ -100,7 +131,7 @@ function known(root) {
 function planPath(root, rel) {
   if (!root || !known(root)) return '';
   const p = String(rel || '');
-  if (PLAN_NAMES.indexOf(p) < 0) return '';
+  if (!PLAN_FILE_RE.test(p)) return '';
   return join(resolve(root), p);
 }
 
@@ -175,11 +206,15 @@ export function startServer() {
         if (req.headers['x-shupian-token'] !== token) { json(401, { error: 'token' }); return; }
         if (url.pathname === '/api/ping') { json(200, { ok: true }); return; }
         if (url.pathname === '/api/projects') {
-          const withSummary = (x) => Object.assign({}, x, { active: Date.now() - (x.last || 0) < ACTIVE_MS, summary: summary(x.path) });
+          const withSummary = (x) => {
+            const plans = planFiles(x.path).map((f) => summaryOf(x.path, f));
+            const file = currentFile(x.path);
+            return Object.assign({}, x, { active: Date.now() - (x.last || 0) < ACTIVE_MS, plans, file, summary: plans.filter((s) => s.file === file)[0] || null });
+          };
           const claude = claudeFolders().map(withSummary);
           const seen = new Set(claude.map((x) => norm(x.path)));
           const hist = history().filter((x) => !seen.has(norm(x.path))).map((x) => withSummary({ path: x.path, name: basename(x.path), last: x.last }));
-          json(200, { claude, history: hist });
+          json(200, { claude, history: hist, last: readCurrent().last });
           return;
         }
         const readJsonBody = async () => {
@@ -197,6 +232,14 @@ export function startServer() {
           mkdirSync(target);
           const full = remember(target);
           json(200, { path: full, name: basename(full) });
+          return;
+        }
+        if (url.pathname === '/api/current' && req.method === 'POST') {
+          const body = await readJsonBody();
+          if (!body.path || !known(body.path)) { json(404, { error: 'folder' }); return; }
+          if (!PLAN_FILE_RE.test(String(body.file || '')) || !existsSync(join(resolve(body.path), body.file))) { json(404, { error: 'file' }); return; }
+          setCurrent(body.path, body.file);
+          json(200, { ok: true });
           return;
         }
         if (url.pathname === '/api/locate' && req.method === 'POST') {
@@ -219,7 +262,7 @@ export function startServer() {
           const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
           if (!body.path || !existsSync(body.path) || !known(body.path)) { json(404, { error: 'folder' }); return; }
           const full = remember(body.path);
-          json(200, { path: full, name: basename(full), summary: summary(full) });
+          json(200, { path: full, name: basename(full), file: currentFile(full), plans: planFiles(full).map((f) => summaryOf(full, f)), summary: summary(full) });
           return;
         }
         if (url.pathname === '/api/file') {

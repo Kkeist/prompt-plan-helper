@@ -5,13 +5,23 @@
 function folderRows(container, o) {
   clear(container);
   container.append(h('p', { class: 'muted', text: t('正在读取最近的文件夹') }));
+  // 选定这个文件夹当前用哪一份，选完重新列出
+  const choosePlan = (anchor, x) => o.kit.openPop(anchor, (pop) => {
+    x.plans.forEach((pl) => pop.append(o.kit.popItem((pl.title || x.name) + '（' + pl.file + '）', () => {
+      Api.call('POST', '/api/current', { path: x.path, file: pl.file }).then(() => folderRows(container, o), (e) => o.kit.toast(t('无法选定计划书：{why}', { why: errText(e) })));
+    }, { on: pl.file === x.file })));
+  });
   Api.call('GET', '/api/projects').then((data) => {
     clear(container);
     const row = (x) => {
       const s = x.summary;
+      const planBtn = x.plans && x.plans.length > 1
+        ? h('button', { type: 'button', class: 'link plan-pick', onclick() { choosePlan(planBtn, x); } }, t('计划书：{file} ▾', { file: x.file }))
+        : null;
       const info = h('div', { class: 'finfo' },
         h('div', { class: 'fname' }, h('span', { text: x.name }), x.active ? h('span', { class: 'badge', text: t('使用中') }) : null),
         h('div', { class: 'fpath', text: x.path }),
+        planBtn,
         s ? h('div', { class: 'muted', text: t('已完成 {done} / {total}，待补 {n} 处', { done: s.done, total: s.total, n: s.pending }) }) : h('div', { class: 'muted', text: t('尚无计划书') }));
       const isCur = o.current && o.current.toLowerCase() === x.path.toLowerCase();
       return h('div', { class: 'frow' + (isCur ? ' cur' : '') }, info,

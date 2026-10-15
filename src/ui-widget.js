@@ -1,6 +1,7 @@
 'use strict';
 // 悬浮在别的页面上的小窗：指出一个东西、框一块区域或记下当前页面、写一句话，合成一段话复制给 AI。
-// 在浏览器扩展里并且打开过桌面小窗口时，可以选一个功能（输入 @ 切换），把问题直接记到计划书的该功能下面。
+// 一次可以攒多条问题。在浏览器扩展里并且打开过桌面小窗口时，每条问题可以选一个功能（输入 @ 切换），
+// 再一起记到计划书里对应功能的下面。
 
 function createFeedback(opts) {
   const tools = opts.tools;
@@ -9,12 +10,16 @@ function createFeedback(opts) {
   const body = h('div', { class: 'fb-body' });
   app.append(head, body);
   const kit = createKit(app);
+  // 当前正在写的一条
   const S = { text: '', element: '', styles: '', info: null, shot: null };
+  // 已经写好、还没有记进计划书的
+  const queue = [];
   // 计划书通道：off（不可用，why 说明原因）、loading、ready、empty（没有计划书或没有功能）
+  // projects 里每一项是一份计划书：{ path, name（文件夹名）, file, summary, multi（这个文件夹里有多份）}
   const link = { state: Link.available ? 'loading' : 'off', why: '', projects: [], project: null, features: [], target: null };
   const targetKey = NS + ':target';
-  const planName = (x) => (x.summary && x.summary.title) || x.name;
-  const planUrl = (x) => '/api/file?root=' + encodeURIComponent(x.path) + '&p=' + encodeURIComponent(x.summary.file);
+  const planName = (x) => ((x.summary && x.summary.title) || x.name) + (x.multi ? '（' + x.file + '）' : '');
+  const planUrl = (x) => '/api/file?root=' + encodeURIComponent(x.path) + '&p=' + encodeURIComponent(x.file);
   const featLabel = (f) => (f.no ? f.no + ' ' : '') + f.name;
 
   const logo = document.createElement('span');
@@ -35,12 +40,42 @@ function createFeedback(opts) {
     return out;
   }
 
-  function feedbackText() {
+  function whereText() {
     const ctx = tools.context();
-    return Core.buildFeedback({
-      text: S.text, page: ctx.page, view: ctx.view, element: S.element, styles: S.styles, summary: infoLines(),
-      errors: tools.errors(), shot: S.shot ? t('截图已复制到剪贴板，请另行粘贴') : '',
-    }, LANG);
+    const out = [];
+    try { const u = new URL(ctx.page); out.push((LANG === 'zh' ? '页面：' : 'Page: ') + u.host + u.pathname); } catch (e) { /* 地址不是标准网址时不写页面 */ }
+    if (S.element) out.push((LANG === 'zh' ? '元素：' : 'Element: ') + S.element);
+    return out.length ? '（' + out.join('；') + '）' : '';
+  }
+
+  // 正在写的这一条的快照；没写字就是 null
+  function snapshot() {
+    const text = S.text.trim();
+    if (!text) return null;
+    const ctx = tools.context();
+    return {
+      text, element: S.element, styles: S.styles, page: ctx.page, view: ctx.view, where: whereText(),
+      no: link.target ? link.target.no : '', name: link.target ? link.target.name : '', label: link.target ? featLabel(link.target) : '',
+    };
+  }
+
+  function feedbackText() {
+    const cur = snapshot();
+    const all = queue.concat(cur ? [cur] : []);
+    const errors = tools.errors();
+    const shot = S.shot ? t('截图已复制到剪贴板，请另行粘贴') : '';
+    if (all.length <= 1) {
+      const one = all[0];
+      const ctx = tools.context();
+      return Core.buildFeedback({
+        text: one ? one.text : '', page: one ? one.page : ctx.page, view: one ? one.view : ctx.view, element: one ? one.element : S.element,
+        styles: one ? one.styles : S.styles, summary: infoLines(), errors, shot,
+      }, LANG);
+    }
+    return all.map((it, i) => (i + 1) + '. ' + (it.label ? '@ ' + it.label : '') + '\n' + Core.buildFeedback({
+      text: it.text, page: it.page, view: it.view, element: it.element, styles: it.styles,
+      summary: i === 0 ? infoLines() : [], errors: i === 0 ? errors : [], shot: i === 0 ? shot : '',
+    }, LANG)).join('\n');
   }
 
   async function loadPlan() {
@@ -50,7 +85,7 @@ function createFeedback(opts) {
     if (!f.exists) { link.state = 'empty'; return; }
     link.features = Core.issueList(f.text);
     const saved = LS.get(targetKey, null) || {};
-    const keep = link.target || (saved.path === link.project.path ? saved : null);
+    const keep = link.target || (saved.path === link.project.path && saved.file === link.project.file ? saved : null);
     link.target = (keep && link.features.filter((x) => x.no === keep.no && x.name === keep.name)[0]) || link.features[0] || null;
     link.state = link.target ? 'ready' : 'empty';
   }
@@ -60,9 +95,14 @@ function createFeedback(opts) {
     link.state = 'loading';
     try {
       const data = await Link.call('GET', '/api/projects');
-      link.projects = data.claude.concat(data.history).filter((x) => x.summary);
-      const saved = LS.get(targetKey, null) || {};
-      link.project = link.projects.filter((x) => x.path === saved.path)[0] || link.projects.filter((x) => x.active)[0] || link.projects[0] || null;
+      link.projects = [];
+      data.claude.concat(data.history).forEach((x) => (x.plans || []).forEach((p) => {
+        link.projects.push({ path: x.path, name: x.name, file: p.file, summary: p, active: x.active, current: p.file === x.file, multi: x.plans.length > 1 });
+      }));
+      const same = (a, b) => b && a.path === b.path && a.file === b.file;
+      const saved = LS.get(targetKey, null);
+      link.project = link.projects.filter((x) => same(x, saved))[0] || link.projects.filter((x) => same(x, data.last))[0]
+        || link.projects.filter((x) => x.active && x.current)[0] || link.projects.filter((x) => x.current)[0] || null;
       await loadPlan();
     } catch (e) {
       link.state = 'off';
@@ -72,7 +112,7 @@ function createFeedback(opts) {
   }
 
   function rememberTarget() {
-    if (link.project && link.target) LS.set(targetKey, { path: link.project.path, no: link.target.no, name: link.target.name });
+    if (link.project && link.target) LS.set(targetKey, { path: link.project.path, file: link.project.file, no: link.target.no, name: link.target.name });
   }
 
   // 功能列表，下面接可换的计划书
@@ -99,32 +139,39 @@ function createFeedback(opts) {
     });
   }
 
-  function whereText() {
-    const ctx = tools.context();
-    const out = [];
-    try { const u = new URL(ctx.page); out.push((LANG === 'zh' ? '页面：' : 'Page: ') + u.host + u.pathname); } catch (e) { /* 地址不是标准网址时不写页面 */ }
-    if (S.element) out.push((LANG === 'zh' ? '元素：' : 'Element: ') + S.element);
-    return out.length ? '（' + out.join('；') + '）' : '';
+  // 把正在写的这一条放进列表，输入框清空准备写下一条
+  function addAnother() {
+    const cur = snapshot();
+    if (!cur) { kit.toast(t('请先写下问题。')); return; }
+    queue.push(cur);
+    S.text = '';
+    S.element = '';
+    S.styles = '';
+    render();
   }
 
   async function record() {
-    if (!S.text.trim()) { kit.toast(t('请先写下问题。')); return; }
+    const cur = snapshot();
+    const all = queue.concat(cur ? [cur] : []);
+    if (!all.length) { kit.toast(t('请先写下问题。')); return; }
     try {
       const f = await Link.call('GET', planUrl(link.project));
-      const hit = f.exists && Core.issueList(f.text).filter((x) => x.no === link.target.no && x.name === link.target.name)[0];
-      if (!hit) {
+      const feats = f.exists ? Core.issueList(f.text) : [];
+      const items = all.map((it) => ({ it, hit: feats.filter((x) => x.no === it.no && x.name === it.name)[0] }));
+      const lost = items.filter((x) => !x.hit);
+      if (lost.length) {
         await loadPlan();
         render();
-        kit.toast(t('计划书里已经没有这个功能，请重新选择。'));
+        kit.toast(t('计划书里已经没有这些功能：{names}，请重新选择。', { names: lost.map((x) => x.it.label || t('未选功能')).join('、') }));
         return;
       }
-      const r = Core.addIssue(f.text, hit.featureLine, S.text.trim() + whereText(), Core.today());
+      const r = Core.addIssues(f.text, items.map((x) => ({ featureLine: x.hit.featureLine, text: x.it.text + x.it.where })), Core.today());
       if (!r.ok) { kit.toast(t('请先写下问题。')); return; }
       await Link.call('PUT', planUrl(link.project), r.md);
-      const name = featLabel(link.target);
+      queue.length = 0;
       S.text = '';
       render();
-      kit.toast(t('已记到「{name}」。', { name }));
+      kit.toast(t('已记 {n} 条问题到计划书。', { n: r.added }));
     } catch (e) {
       kit.toast(t('没有记进计划书：{why}', { why: e.message === 'down' ? t('桌面小窗口没有响应。') : errText(e) }));
     }
@@ -177,6 +224,11 @@ function createFeedback(opts) {
       h('button', { type: 'button', class: 'btn', onclick: pick }, t('选取元素')),
       h('button', { type: 'button', class: 'btn', onclick: region }, t('区域截图')),
       h('button', { type: 'button', class: 'btn', onclick: currentPage }, t('当前页面'))));
+    queue.forEach((it, i) => {
+      body.append(h('div', { class: 'chipline queued' },
+        h('span', { text: (it.label ? '@ ' + it.label + '　' : '') + it.text }),
+        h('button', { type: 'button', class: 'x', title: t('删除'), 'aria-label': t('删除'), onclick() { queue.splice(i, 1); render(); } }, '✕')));
+    });
     if (S.element) {
       body.append(h('div', { class: 'chipline' }, h('span', { text: S.element }),
         h('button', { type: 'button', class: 'x', title: t('清除'), onclick() { S.element = ''; S.styles = ''; render(); } }, '✕')));
@@ -213,6 +265,7 @@ function createFeedback(opts) {
     });
     body.append(ta);
     body.append(h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'btn', onclick: addAnother }, t('再写一条')),
       ready ? h('button', { type: 'button', class: 'btn primary', onclick: record }, t('记到计划书')) : null,
       h('button', { type: 'button', class: ready ? 'btn' : 'btn primary', onclick() { copyThen(kit, feedbackText()); } }, t('复制文字')),
       S.shot ? h('button', { type: 'button', class: 'btn', onclick: copyShot }, t('复制截图')) : null));

@@ -319,12 +319,6 @@ function findBlock(lines, i) {
   return -1;
 }
 
-function blockName(lines, j) {
-  if (j < 0) return '';
-  const nn = numberedName(info(lines[j]).body);
-  return (nn.no ? nn.no + ' ' : '') + nn.name;
-}
-
 // 某一行「页面里有什么：」「怎么才算做好：」下面的列表项
 function itemsUnder(lines, i) {
   const t = info(lines[i]);
@@ -386,20 +380,6 @@ function structure(md) {
     }
   });
   return { pages, features, widgets, cases };
-}
-
-// 投递时可选的位置：kind 是 page / widget / feature / case
-function positions(md) {
-  const lines = split(md);
-  const s = structure(md);
-  const zh = docLang(md) === 'zh';
-  const names = zh ? { page: '页面', widget: '东西', feature: '功能', case: '情况' } : { page: 'Page', widget: 'Thing', feature: 'Feature', case: 'Case' };
-  const out = [];
-  s.pages.forEach((p) => out.push({ kind: 'page', label: names.page + ' ' + (p.no + ' ' + p.name).trim() }));
-  s.widgets.forEach((w) => out.push({ kind: 'widget', label: names.widget + ' ' + blockName(lines, w.block) + ' › ' + w.name }));
-  s.features.forEach((f) => out.push({ kind: 'feature', label: names.feature + ' ' + (f.no + ' ' + f.name).trim() }));
-  s.cases.forEach((c) => out.push({ kind: 'case', label: names.case + ' ' + blockName(lines, c.block) + ' › ' + c.name }));
-  return out;
 }
 
 // ---------- 进度 ----------
@@ -510,6 +490,23 @@ function addIssue(md, featureLine, text, date) {
     lines.splice(insertAt, 0, label, bullet);
   }
   return { ok: true, md: join(lines) };
+}
+
+// 一次加多条：items 是 [{ featureLine, text }]，行号都按传入的 md 算。
+// 从靠后的功能往前加，前面的行号不受影响；同一个功能里按传入的顺序加。空的跳过。
+function addIssues(md, items, date) {
+  const list = (items || []).filter((x) => String(x.text || '').trim());
+  if (!list.length) return { ok: false, code: 'empty' };
+  const groups = {};
+  list.forEach((x) => { (groups[x.featureLine] = groups[x.featureLine] || []).push(x); });
+  let out = md;
+  Object.keys(groups).map(Number).sort((a, b) => b - a).forEach((line) => {
+    groups[line].forEach((x) => {
+      const r = addIssue(out, line, x.text, date);
+      if (r.ok) out = r.md;
+    });
+  });
+  return { ok: true, md: out, added: list.length };
 }
 
 function setIssueDone(md, line, done) {
@@ -712,8 +709,8 @@ module.exports = {
   split, join, info, splitLabel, today, timeStamp, docLang,
   rangeEnd, bodyRange, bodyText, setBody, deleteSubtree, sectionNo, headings,
   pendingList, countPending, getStatus, statusLabel, setStatus, markPassed,
-  titleName, setTitle, structure, positions, nextNumber, checkName,
-  progressList, setProgress, nextProgress, issueList, addIssue, setIssueDone,
+  titleName, setTitle, structure, nextNumber, checkName,
+  progressList, setProgress, nextProgress, issueList, addIssue, addIssues, setIssueDone,
   addBlock, renameBlock, addFlowLine, blankPlan, normalizeForExport,
   buildAiPrompt, buildFeedback,
 };

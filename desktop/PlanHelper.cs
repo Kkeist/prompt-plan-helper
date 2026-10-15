@@ -244,6 +244,8 @@ class Server
 {
     static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
     static readonly string[] PlanNames = { "plan.md", "计划书.md" };
+    // 计划书文件：plan.md、计划书.md，以及同一个文件夹里的多份：plan-名称.md、计划书-名称.md
+    static readonly Regex PlanFileRe = new Regex("^(?:plan|计划书)(?:-[^\\\\/:*?\"<>|]{1,60})?\\.md$", RegexOptions.IgnoreCase);
     readonly string home = Environment.GetEnvironmentVariable("USERPROFILE") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     readonly HashSet<string> connected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     // 拖入的文件夹按名字找到的候选，用户已经明确要打开它，可以连接
@@ -427,6 +429,17 @@ class Server
             SendJson(ctx, 200, new { path = made, name = Path.GetFileName(made) });
             return;
         }
+        if (path == "/api/current" && ctx.Request.HttpMethod == "POST")
+        {
+            var obj = Json.DeserializeObject(Encoding.UTF8.GetString(ReadBody(ctx))) as Dictionary<string, object>;
+            var root = obj != null && obj.ContainsKey("path") ? Convert.ToString(obj["path"]) : "";
+            var file = obj != null && obj.ContainsKey("file") ? Convert.ToString(obj["file"]) : "";
+            if (root == "" || !Known(root)) { SendJson(ctx, 404, new { error = "folder" }); return; }
+            if (!PlanFileRe.IsMatch(file) || !File.Exists(Path.Combine(Path.GetFullPath(root), file))) { SendJson(ctx, 404, new { error = "file" }); return; }
+            SetCurrent(root, file);
+            SendJson(ctx, 200, new { ok = true });
+            return;
+        }
         if (path == "/api/locate" && ctx.Request.HttpMethod == "POST")
         {
             var obj = Json.DeserializeObject(Encoding.UTF8.GetString(ReadBody(ctx))) as Dictionary<string, object>;
@@ -455,7 +468,7 @@ class Server
             var p = obj != null && obj.ContainsKey("path") ? Convert.ToString(obj["path"]) : "";
             if (p == "" || !Directory.Exists(p) || !Known(p)) { SendJson(ctx, 404, new { error = "folder" }); return; }
             var full = Remember(p);
-            SendJson(ctx, 200, new { path = full, name = Path.GetFileName(full), summary = Summary(full) });
+            SendJson(ctx, 200, new { path = full, name = Path.GetFileName(full), file = CurrentFile(full), plans = PlanFiles(full).Select(n => Summary(full, n)).ToList(), summary = Summary(full) });
             return;
         }
         if (path == "/api/file")
@@ -627,7 +640,7 @@ class Server
     string PlanPath(string root, string rel)
     {
         if (string.IsNullOrEmpty(root) || !Known(root)) return null;
-        if (Array.IndexOf(PlanNames, rel) < 0) return null;
+        if (rel == null || !PlanFileRe.IsMatch(rel)) return null;
         return Path.Combine(Path.GetFullPath(root), rel);
     }
 
@@ -635,25 +648,94 @@ class Server
     {
         var claude = ClaudeFolders();
         var now = ToMs(DateTime.Now);
-        Func<Folder, Dictionary<string, object>> shape = f => new Dictionary<string, object>
+        Func<Folder, Dictionary<string, object>> shape = f =>
         {
-            { "path", f.path }, { "name", f.name }, { "last", f.last },
-            { "active", now - f.last < 10 * 60 * 1000 }, { "summary", Summary(f.path) },
+            var plans = PlanFiles(f.path).Select(n => Summary(f.path, n)).ToList();
+            var file = CurrentFile(f.path);
+            return new Dictionary<string, object>
+            {
+                { "path", f.path }, { "name", f.name }, { "last", f.last },
+                { "active", now - f.last < 10 * 60 * 1000 },
+                { "plans", plans }, { "file", file },
+                { "summary", file == "" ? null : Summary(f.path, file) },
+            };
         };
         var seen = new HashSet<string>(claude.Select(x => x.path), StringComparer.OrdinalIgnoreCase);
         return new Dictionary<string, object>
         {
             { "claude", claude.Select(shape).ToList() },
             { "history", History().Where(x => !seen.Contains(x.path)).Select(shape).ToList() },
+            { "last", ReadCurrent().ContainsKey("last") ? ReadCurrent()["last"] : null },
         };
+    }
+
+    // ---------- 同一个文件夹里的多份计划书 ----------
+
+    string CurrentPath { get { return Path.Combine(StateDir, "current.json"); } }
+
+    Dictionary<string, object> ReadCurrent()
+    {
+        try
+        {
+            if (File.Exists(CurrentPath))
+            {
+                var d = Json.DeserializeObject(File.ReadAllText(CurrentPath, Encoding.UTF8)) as Dictionary<string, object>;
+                if (d != null) return d;
+            }
+        }
+        catch (Exception) { }
+        return new Dictionary<string, object>();
+    }
+
+    // 默认的两个名字排在前面，其余按名字排
+    List<string> PlanFiles(string root)
+    {
+        var have = new List<string>();
+        if (Directory.Exists(root))
+        {
+            foreach (var f in Directory.GetFiles(root))
+            {
+                var n = Path.GetFileName(f);
+                if (PlanFileRe.IsMatch(n)) have.Add(n);
+            }
+        }
+        var first = PlanNames.Where(n => have.Any(h => string.Equals(h, n, StringComparison.OrdinalIgnoreCase))).ToList();
+        var rest = have.Where(n => !first.Any(f => string.Equals(f, n, StringComparison.OrdinalIgnoreCase))).OrderBy(n => n, StringComparer.Ordinal).ToList();
+        return first.Concat(rest).ToList();
+    }
+
+    string CurrentFile(string root)
+    {
+        var list = PlanFiles(root);
+        var cur = ReadCurrent();
+        var files = cur.ContainsKey("files") ? cur["files"] as Dictionary<string, object> : null;
+        var key = Path.GetFullPath(root).ToLowerInvariant();
+        if (files != null && files.ContainsKey(key))
+        {
+            var want = Convert.ToString(files[key]);
+            if (list.Contains(want)) return want;
+        }
+        return list.Count > 0 ? list[0] : "";
+    }
+
+    void SetCurrent(string root, string file)
+    {
+        var cur = ReadCurrent();
+        var files = cur.ContainsKey("files") ? cur["files"] as Dictionary<string, object> : null;
+        if (files == null) files = new Dictionary<string, object>();
+        files[Path.GetFullPath(root).ToLowerInvariant()] = file;
+        cur["files"] = files;
+        cur["last"] = new Dictionary<string, object> { { "path", Path.GetFullPath(root) }, { "file", file } };
+        Directory.CreateDirectory(StateDir);
+        File.WriteAllText(CurrentPath, Json.Serialize(cur));
     }
 
     // ---------- 计划书摘要（和 src/core.js 里的统计一致） ----------
 
-    object Summary(string root)
+    object Summary(string root, string file = null)
     {
-        var name = PlanNames.FirstOrDefault(n => File.Exists(Path.Combine(root, n)));
-        if (name == null) return null;
+        var name = file ?? CurrentFile(root);
+        if (string.IsNullOrEmpty(name) || !File.Exists(Path.Combine(root, name))) return null;
         var md = File.ReadAllText(Path.Combine(root, name), Encoding.UTF8).Replace("\r\n", "\n").Replace("\r", "\n");
         var lines = md.Split('\n');
         var pending = Pending(lines);

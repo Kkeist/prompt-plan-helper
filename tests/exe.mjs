@@ -74,13 +74,35 @@ try {
     ok(label + '：新建文件夹', r.status === 200 && existsSync(join(proj, made)) && r.json.name === made, r.text.slice(0, 120));
     ok(label + '：同名文件夹被拒绝', (await post('/api/mkdir', { parent: proj, name: made })).status === 409);
     ok(label + '：非法名称被拒绝', (await post('/api/mkdir', { parent: proj, name: 'a/b' })).status === 400 && (await post('/api/mkdir', { parent: proj, name: '  ' })).status === 400);
-    ok(label + '：不在未知文件夹里新建', (await post('/api/mkdir', { parent: 'C:\Windows', name: made + 'x' })).status === 404);
+    ok(label + '：不在未知文件夹里新建', (await post('/api/mkdir', { parent: 'C:\\Windows', name: made + 'x' })).status === 404);
     const hit = await post('/api/locate', { name: '番茄钟项目', entries: ['plan.md'] });
     ok(label + '：按名字和文件找到文件夹', hit.status === 200 && hit.json.candidates.some((x) => x.toLowerCase() === proj.toLowerCase()), hit.text.slice(0, 160));
     const miss = await post('/api/locate', { name: '番茄钟项目', entries: ['不存在的文件.md'] });
     ok(label + '：里面的文件对不上时不返回', miss.status === 200 && miss.json.candidates.length === 0, miss.text.slice(0, 160));
   }
+  // 同一个文件夹里的多份计划书
+  async function planChecks(label, info, extra) {
+    const projectsOf = async () => (await call(info, '/api/projects')).json.claude.filter((x) => x.name === '番茄钟项目')[0];
+    const url = (f) => '/api/file?root=' + encodeURIComponent(proj) + '&p=' + encodeURIComponent(f);
+    const put = await call(info, url(extra), { method: 'PUT', body: '# 计划书：第二份\n\n状态：整理中　　更新：2026-10-15\n' });
+    ok(label + '：可以写出第二份计划书', put.status === 200 && existsSync(join(proj, extra)), put.text.slice(0, 100));
+    const bad = await call(info, url('secret.md'), { method: 'PUT', body: 'x' });
+    ok(label + '：不是计划书的名字被拒绝', bad.status === 400 && !existsSync(join(proj, 'secret.md')));
+    const pr = await projectsOf();
+    ok(label + '：列出多份计划书，默认用 plan.md', pr && pr.plans.length >= 2 && pr.file === 'plan.md' && pr.plans.map((x) => x.file).indexOf(extra) >= 0, pr && { file: pr.file, plans: pr.plans.map((x) => x.file) });
+    const sw = await call(info, '/api/current', { method: 'POST', body: JSON.stringify({ path: proj, file: extra }) });
+    const pr2 = await projectsOf();
+    ok(label + '：选定当前的一份', sw.status === 200 && pr2.file === extra && pr2.summary && pr2.summary.file === extra && pr2.summary.title === '第二份', pr2 && { file: pr2.file, summary: pr2.summary });
+    const last = (await call(info, '/api/projects')).json.last;
+    ok(label + '：记着最后打开的是哪一份', last && last.file === extra, last);
+    const miss = await call(info, '/api/current', { method: 'POST', body: JSON.stringify({ path: proj, file: 'plan-不存在.md' }) });
+    ok(label + '：选不存在的计划书被拒绝', miss.status === 404);
+    const unk = await call(info, '/api/current', { method: 'POST', body: JSON.stringify({ path: 'C:\\Windows', file: extra }) });
+    ok(label + '：未知文件夹被拒绝', unk.status === 404);
+    await call(info, '/api/current', { method: 'POST', body: JSON.stringify({ path: proj, file: 'plan.md' }) });
+  }
   await folderChecks('桌面版', exeInfo, '新文件夹');
+  await planChecks('桌面版', exeInfo, '计划书-第二份.md');
 
   // 和 Node 版本服务对照：同一份数据，摘要一致
   const nodeProc = spawn(process.execPath, [join(root, 'tools', 'app-server.mjs')], { env: Object.assign({}, env, { PORT: '14633' }), stdio: 'ignore' });
@@ -93,6 +115,7 @@ try {
   const b = nodeInfo ? await call(nodeInfo, '/api/connect', { method: 'POST', body: JSON.stringify({ path: proj }) }) : null;
   ok('两个版本给出同样的摘要', !!b && JSON.stringify(a.json.summary) === JSON.stringify(b.json.summary), [a.json && a.json.summary, b && b.json && b.json.summary]);
   if (nodeInfo) await folderChecks('Node 版', nodeInfo, '节点文件夹');
+  if (nodeInfo) await planChecks('Node 版', nodeInfo, 'plan-第二份.md');
   nodeProc.kill();
 } finally {
   exeProc.kill();

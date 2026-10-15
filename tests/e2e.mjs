@@ -170,10 +170,40 @@ try {
   await page.click(Q('.modal-foot button', '添加', true));
   await page.sleep(300);
   ok('问题出现在功能清单里', await H.exists('.issue .issue-text', '点暂停后数字仍在走'));
+  ok('记问题之后仍是功能清单，状态没有退回整理中', (await H.text('.status-head h2')) === '功能清单' && (await H.exists('.statusline .state', '已通过', true)), [await H.text('.status-head h2'), await H.text('.statusline .state')]);
   ok('未处理的问题计数', /未处理的问题 1 条/.test((await H.text('.status-head .muted')) || ''));
   await page.click(Q('.issue .btn.sm', '已修', true));
   await page.sleep(300);
   ok('标记已修后从列表消失', !(await H.exists('.issue')));
+
+  console.log('写问题的小弹窗：一次写多条');
+  await page.click(Q('.status-row .btn.sm', '＋'));
+  await page.click(Q('.modal.small textarea'));
+  await page.insert('开始按钮点了没有反应');
+  await page.click(Q('.modal-foot button', '再写一条', true));
+  await page.sleep(150);
+  ok('再写一条：上一条进入列表，输入框清空', (await H.exists('.modal.small .queue .issue-text', '开始按钮点了没有反应')) && (await page.eval('__one(".modal.small textarea").value')) === '');
+  await page.click(Q('.modal.small textarea'));
+  await page.insert('完成轮数没有加一@');
+  await page.sleep(150);
+  await page.click(Q('.pop button', '4.2 今天完成几轮'));
+  await page.sleep(100);
+  await page.click(Q('.modal-foot button', '再写一条', true));
+  await page.sleep(100);
+  await page.click(Q('.modal.small textarea'));
+  await page.insert('第三条没点再写一条');
+  await page.click(Q('.modal-foot button', '添加', true));
+  await page.sleep(300);
+  ok('三条问题都进了功能清单', (await H.count('.issue .issue-text')) === 3, await H.count('.issue .issue-text'));
+  ok('问题在各自的功能下面', /未处理的问题 3 条/.test((await H.text('.status-head .muted')) || ''));
+  const order = await page.eval('JSON.stringify(__deep(".status-row, .issue").map(function(e){return e.className.indexOf("issue")>=0?"问题:"+e.textContent.slice(0,12):"功能"}))');
+  ok('4.1 下面一条、4.2 下面两条', /功能.*问题:开始按钮.*功能.*问题:完成轮数.*问题:第三条/.test(order.replace(/\u/g, 'u')) || (JSON.parse(order).filter((x) => x === '功能').length === 2 && JSON.parse(order).filter((x) => /^问题/.test(x)).length === 3), order);
+  await page.click(Q('.issue .btn.sm', '已修', true));
+  await page.sleep(150);
+  await page.click(Q('.issue .btn.sm', '已修', true));
+  await page.sleep(150);
+  await page.click(Q('.issue .btn.sm', '已修', true));
+  await page.sleep(150);
 
   console.log('浏览器文件夹：连接、保存、自动读回');
   await page.click(btn('⋯'));
@@ -196,6 +226,8 @@ try {
   }
   await page.resize(360, 480);
   console.log('点击编辑：页面位置不跳');
+  await page.eval('__deep(".sec.closed .fold").forEach(function(b){b.click()})');
+  await page.sleep(150);
   const tallIdx = await page.eval('(function(){var bs=__deep(".box");var best=0;bs.forEach(function(b,i){if(b.getBoundingClientRect().height>bs[best].getBoundingClientRect().height)best=i});return best})()');
   await page.eval('(function(){var body=__one(".body");var b=__deep(".box")[' + tallIdx + '];body.scrollTop=0;var r=b.getBoundingClientRect(),br=body.getBoundingClientRect();body.scrollTop=r.top-br.top-120;})()');
   await page.sleep(150);
@@ -298,6 +330,37 @@ try {
   await HW.wait(async () => /番茄钟/.test((await HW.text('.doc h1')) || ''), 40);
   ok('已有计划书：用文件夹里的，页面显示它的内容', /番茄钟/.test((await HW.text('.doc h1')) || ''), await HW.text('.doc h1'));
   ok('已有计划书：磁盘上的没有被改', readFileSync(join(projDir, 'plan.md'), 'utf8') === diskBefore);
+
+  console.log('桌面服务：同一个文件夹里的多份计划书');
+  ok('状态行显示当前是哪一份', await HW.exists('.statusline button', 'plan.md ▾', true));
+  await win.click(Q('.statusline button', 'plan.md ▾', true));
+  await HW.wait(async () => HW.exists('.pop button', '新建一份计划书', true), 40);
+  await win.click(Q('.pop button', '新建一份计划书', true));
+  await HW.wait(async () => HW.exists('.modal input'), 40);
+  await win.click(Q('.modal input'));
+  await win.insert('第二版');
+  await win.click(Q('.modal-foot button', '创建', true));
+  await HW.wait(async () => HW.exists('.statusline button', '计划书-第二版.md ▾', true), 60);
+  ok('新建一份：文件夹里多了 计划书-第二版.md', existsSync(join(projDir, '计划书-第二版.md')));
+  ok('新建一份：页面显示的是新的这份', (await HW.text('.doc h1')) === '第二版', await HW.text('.doc h1'));
+  ok('新建一份：原来的 plan.md 没被改', readFileSync(join(projDir, 'plan.md'), 'utf8') === diskBefore);
+  await win.click(Q('.statusline button', '计划书-第二版.md ▾', true));
+  await HW.wait(async () => HW.exists('.pop button', '番茄钟（示例）（plan.md）', true), 40);
+  ok('下拉里列出两份', (await HW.count('.pop button')) === 3, await HW.count('.pop button'));
+  await win.click(Q('.pop button', '番茄钟（示例）（plan.md）', true));
+  await HW.wait(async () => /番茄钟/.test((await HW.text('.doc h1')) || ''), 40);
+  ok('切回 plan.md：显示它的内容', /番茄钟/.test((await HW.text('.doc h1')) || ''), await HW.text('.doc h1'));
+  await win.click(Q('.statusline button', 'plan.md ▾', true));
+  await HW.wait(async () => HW.exists('.pop button', '第二版（计划书-第二版.md）', true), 40);
+  await win.click(Q('.pop button', '第二版（计划书-第二版.md）', true));
+  await HW.wait(async () => (await HW.text('.doc h1')) === '第二版', 40);
+  await goHub();
+  ok('最近页：有多份时显示当前是哪一份', await HW.exists('.plan-pick', '计划书：计划书-第二版.md ▾', true), await HW.text('.plan-pick'));
+  await win.click(Q('.plan-pick'));
+  await HW.wait(async () => HW.exists('.pop button', '番茄钟（示例）（plan.md）', true), 40);
+  await win.click(Q('.pop button', '番茄钟（示例）（plan.md）', true));
+  await HW.wait(async () => HW.exists('.plan-pick', '计划书：plan.md ▾', true), 40);
+  ok('最近页：选定当前这一份', await HW.exists('.plan-pick', '计划书：plan.md ▾', true), await HW.text('.plan-pick'));
 
   // 新建文件夹：先选放在哪里，再起名字
   await goHub();
