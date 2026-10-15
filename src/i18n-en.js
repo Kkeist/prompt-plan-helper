@@ -83,7 +83,7 @@ const EN_DICT = {
   '断开文件夹': 'Disconnect the folder',
   '删除项目': 'Delete project',
   '更多': 'More',
-  '尚未创建计划书。可以新建、查看示例，或导入已有的计划书。': 'There is no plan yet. Create one, view an example, or import an existing plan.',
+  '还没有计划书。': 'There is no plan yet.',
   '已保存。': 'Saved.',
   '已保存到浏览器。': 'Saved in the browser.',
   '正在读取最近的文件夹': 'Reading recent folders',

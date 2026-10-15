@@ -810,7 +810,7 @@ const EN_DICT = {
   '断开文件夹': 'Disconnect the folder',
   '删除项目': 'Delete project',
   '更多': 'More',
-  '尚未创建计划书。可以新建、查看示例，或导入已有的计划书。': 'There is no plan yet. Create one, view an example, or import an existing plan.',
+  '还没有计划书。': 'There is no plan yet.',
   '已保存。': 'Saved.',
   '已保存到浏览器。': 'Saved in the browser.',
   '正在读取最近的文件夹': 'Reading recent folders',
@@ -1584,18 +1584,14 @@ function nameError(code, kind) {
   return t('没有找到可以添加的位置。');
 }
 
-// 桌面窗口：最近标签用小窗口贴在屏幕右下角，计划书标签用大窗口放在中间
+// 桌面窗口：打开时是贴在屏幕右下角的小窗口，之后切换标签、打开计划书都不改变大小和位置
 const WINDOW_MODE = !!SERVER && new URLSearchParams(location.search).get('win') === '1';
+const WINDOW_SIZE = { w: 360, h: 480 };
 
-function placeWindow(small) {
+function placeWindow() {
   if (!WINDOW_MODE) return;
-  const w = small ? 360 : 980;
-  const hh = small ? 480 : 820;
-  const sw = screen.availWidth;
-  const sh = screen.availHeight;
-  window.resizeTo(w, hh);
-  if (small) window.moveTo((screen.availLeft || 0) + sw - w - 12, (screen.availTop || 0) + sh - hh - 12);
-  else window.moveTo((screen.availLeft || 0) + Math.max(0, Math.round((sw - w) / 2)), (screen.availTop || 0) + Math.max(0, Math.round((sh - hh) / 2)));
+  window.resizeTo(WINDOW_SIZE.w, WINDOW_SIZE.h);
+  window.moveTo((screen.availLeft || 0) + screen.availWidth - WINDOW_SIZE.w - 12, (screen.availTop || 0) + screen.availHeight - WINDOW_SIZE.h - 12);
 }
 
 function createApp(opts) {
@@ -1689,7 +1685,6 @@ function createApp(opts) {
     loadProject(p.id);
     folderInit();
     renderAll();
-    placeWindow(false);
   }
 
   function switchProject(id) {
@@ -1709,7 +1704,6 @@ function createApp(opts) {
     persist();
     S.view = 'hub';
     renderAll();
-    placeWindow(true);
   }
 
   // 关掉一个标签：项目还在，可以从「更多」里再打开
@@ -2559,8 +2553,9 @@ function createApp(opts) {
     if (S.view === 'hub') {
       content = renderHubView();
     } else if (!S.md.trim()) {
-      content = h('div', { class: 'col' }, h('div', { class: 'empty' },
-        h('p', { text: t('尚未创建计划书。可以新建、查看示例，或导入已有的计划书。') }),
+      content = h('div', { class: 'col' }, h('div', { class: 'doc empty' },
+        h('h1', { text: S.project.name || t('新项目') }),
+        h('p', { class: 'muted', text: t('还没有计划书。') }),
         h('div', { class: 'row' },
           h('button', { type: 'button', class: 'btn primary', onclick: newBlank }, t('新建空白计划书')),
           h('button', { type: 'button', class: 'btn', onclick: loadExample }, t('查看示例')),
@@ -2618,7 +2613,7 @@ function createApp(opts) {
   startProject();
   if (SERVER && opts.folder) connectFolderPath(opts.folder);
   renderAll();
-  placeWindow(S.view === 'hub');
+  placeWindow();
 
   return {
     el: app,

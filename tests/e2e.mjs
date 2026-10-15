@@ -58,7 +58,15 @@ const enc = projDir.replace(/[^A-Za-z0-9]/g, '-');
 mkdirSync(join(tmpHome, '.claude', 'projects', enc), { recursive: true });
 writeFileSync(join(tmpHome, '.claude', 'projects', enc, 'a.jsonl'), '{}\n');
 utimesSync(join(tmpHome, '.claude', 'projects', enc, 'a.jsonl'), new Date(), new Date());
-writeFileSync(join(tmpHome, '.claude.json'), JSON.stringify({ projects: { [projDir]: {} } }));
+// 第二个文件夹没有计划书，会话记录比第一个旧
+const emptyDir = join(tmpHome, '空文件夹');
+mkdirSync(emptyDir, { recursive: true });
+const encEmpty = emptyDir.replace(/[^A-Za-z0-9]/g, '-');
+mkdirSync(join(tmpHome, '.claude', 'projects', encEmpty), { recursive: true });
+writeFileSync(join(tmpHome, '.claude', 'projects', encEmpty, 'b.jsonl'), '{}\n');
+const hourAgo = new Date(Date.now() - 3600 * 1000);
+utimesSync(join(tmpHome, '.claude', 'projects', encEmpty, 'b.jsonl'), hourAgo, hourAgo);
+writeFileSync(join(tmpHome, '.claude.json'), JSON.stringify({ projects: { [projDir]: {}, [emptyDir]: {} } }));
 const srvPort = 14500 + Math.floor(Math.random() * 400);
 const appSrv = spawn(process.execPath, [join(root, 'tools', 'app-server.mjs')], {
   stdio: 'ignore',
@@ -194,6 +202,7 @@ try {
   const url = 'http://127.0.0.1:' + srvInfo.port + '/index.html?k=' + srvInfo.token + '&win=1';
   const win = await chrome.newPage();
   await win.init(DEEP);
+  await win.init('window.__sizeCalls = []; window.resizeTo = function (w, h) { window.__sizeCalls.push(["resize", w, h]); }; window.moveTo = function (x, y) { window.__sizeCalls.push(["move", x, y]); };');
   await win.resize(420, 640);
   const HW = helpers(win);
   await win.goto(url + '&view=hub');
@@ -205,6 +214,8 @@ try {
   ok('显示进度摘要', /已完成 1 \/ 2，待补 0 处/.test((await HW.text('.frow .muted')) || ''), await HW.text('.frow .muted'));
   ok('复制地址旁写着「方便打开 CLI」', await HW.exists('.frow .cli-hint', '方便打开 CLI'));
   ok('界面里没有 Claude 字样', !/Claude/.test(await win.eval('__one(".app").textContent')));
+  const sizeAtOpen = JSON.stringify(await win.eval('window.__sizeCalls'));
+  ok('打开时只设置一次小窗口大小和位置', /^\[\["resize",360,480\],\["move",\d+,\d+\]\]$/.test(sizeAtOpen), sizeAtOpen);
   await win.shot(join(shots, '05-最近-420.png'));
   await win.click(Q('.frow .btn.primary'));
   await HW.wait(async () => HW.exists('.status-box'), 40);
@@ -226,6 +237,15 @@ try {
   await win.click(Q('.tabbar .chip', '最近', true));
   await win.sleep(300);
   ok('可以切回「最近」', await HW.exists('.frow'));
+  ok('打开计划书和切回最近都没有改窗口大小', JSON.stringify(await win.eval('window.__sizeCalls')) === sizeAtOpen, await win.eval('window.__sizeCalls'));
+
+  console.log('桌面服务：没有计划书的文件夹');
+  await win.click('(function(){var r=Array.from(__deep(".frow")).filter(function(x){return x.textContent.indexOf("空文件夹")>=0})[0];return r&&r.querySelector(".btn.primary")})()');
+  await HW.wait(async () => HW.exists('.doc.empty h1'), 40);
+  ok('空文件夹：显示文件夹名作为标题', (await HW.text('.doc.empty h1')) === '空文件夹', await HW.text('.doc.empty h1'));
+  ok('空文件夹：有一句说明和新建入口', (await HW.exists('.doc.empty p', '还没有计划书。', true)) && (await HW.exists('.doc.empty button', '新建空白计划书', true)));
+  ok('空文件夹：窗口大小没变', JSON.stringify(await win.eval('window.__sizeCalls')) === sizeAtOpen, await win.eval('window.__sizeCalls'));
+  await win.shot(join(shots, '09-空文件夹-420.png'));
 
   // ================= 悬浮窗 =================
   console.log('小悬浮窗');

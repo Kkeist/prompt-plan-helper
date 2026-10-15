@@ -116,7 +116,7 @@ async function app(view) {
   const hub = view !== 'plan';
   const url = 'http://127.0.0.1:' + info.port + '/index.html?k=' + info.token + '&win=1' + (hub ? '&view=hub' : '');
   if (!exe) { console.error('没有找到 Edge 或 Chrome，请直接打开：' + url); process.exit(2); }
-  spawn(exe, ['--app=' + url, hub ? '--window-size=360,480' : '--window-size=980,820'], { detached: true, stdio: 'ignore' }).unref();
+  spawn(exe, ['--app=' + url, '--window-size=360,480'], { detached: true, stdio: 'ignore' }).unref();
   console.log('已打开：' + url.replace(info.token, '***'));
 }
 
