@@ -247,15 +247,13 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .finfo { flex: 1; min-width: 0; }
 .fname { font-weight: 700; overflow-wrap: anywhere; }
 .badge { margin-left: 0.5em; font-weight: 400; font-size: 0.8em; border: 1px solid var(--ink); border-radius: 0.3em; padding: 0 0.35em; }
-.fpath { color: var(--muted); font-size: 0.85em; overflow-wrap: anywhere; }
-.factions { flex: none; display: flex; flex-direction: column; margin-left: 0.6em; }
-.factions .btn { margin-bottom: 0.3em; }
+.fpath { display: block; border: 0; background: transparent; padding: 0; font: inherit; font-size: 0.85em; text-align: left; color: var(--muted); overflow-wrap: anywhere; cursor: copy; }
+.fpath:hover { text-decoration: underline; }
 
 /* 标签 */
-.head .tabs-in { padding-top: 0; padding-bottom: 0.4em; }
-.tabbar { display: flex; align-items: center; flex: 1; min-width: 0; overflow-x: auto; overscroll-behavior: contain; scrollbar-width: none; }
-.tabbar::-webkit-scrollbar { display: none; }
-.tabbar > * { flex: none; margin-right: 0.35em; }
+.head .tabs-in { padding-top: 0; padding-bottom: 0.1em; }
+.tabbar { display: flex; flex-wrap: wrap; align-items: center; flex: 1; min-width: 0; }
+.tabbar > * { flex: none; max-width: 100%; margin: 0 0.35em 0.35em 0; }
 .tab { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 0.5em; background: var(--paper); }
 .tab.on { border-color: var(--ink); background: var(--ink); color: var(--paper); }
 .tab-name { border: 0; background: transparent; padding: 0.1em 0.2em 0.1em 0.7em; cursor: pointer; text-align: left; }

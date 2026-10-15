@@ -73,6 +73,7 @@ function createApp(opts) {
   function loadProject(id) {
     const rec = LS.get(projectKey(id), null) || {};
     S.md = rec.md || '';
+    S.editedAt = rec.updated || 0;
     S.past = [];
     S.future = [];
     S.folder = freshFolder();
@@ -83,7 +84,7 @@ function createApp(opts) {
   }
 
   function persist() {
-    if (!LS.set(projectKey(S.project.id), { md: S.md, updated: Date.now() })) toast(t('browser_storage_is_full_and_the_latest'));
+    if (!LS.set(projectKey(S.project.id), { md: S.md, updated: S.editedAt || 0 })) toast(t('browser_storage_is_full_and_the_latest'));
     const nm = Core.titleName(S.md);
     if (nm && S.project.name !== nm) {
       S.project.name = nm;
@@ -597,6 +598,7 @@ function createApp(opts) {
   async function folderPush() {
     if (S.folder.state !== 'ready' || !S.md.trim()) return;
     const text = S.md;
+    if (text === S.folder.synced) return;
     try {
       await Folder.write(S.folder.handle, [], S.folder.file, text);
       S.folder.synced = text;
@@ -627,11 +629,14 @@ function createApp(opts) {
       if (manual) toast(t('already_up_to_date'));
       return;
     }
+    // 文件夹里是空的：空的不算最新，保留页面里的并写回去
+    if (!text.trim() && S.md.trim()) { S.folder.synced = text; await folderPush(); return; }
     if (!S.md.trim() || S.md === S.folder.synced) {
       if (silent && body.querySelector('textarea')) return;
       S.folder.synced = text;
       commit(text, true);
-      S.editedAt = found.mtime || Date.now();
+      S.editedAt = found.mtime || 0;
+      persist();
       S.lastSync = clockText();
       renderAll();
       if (!silent) toast(t('loaded_the_plan_from_the_folder'), { label: t('undo'), run: () => { undo(); folderPush(); } });
@@ -1230,12 +1235,14 @@ function createApp(opts) {
       box.append(save);
     }
     if (S.folder.state === 'ready') {
-      box.append(h('span', { class: 'muted', text: t('folder_name_2', { name: S.folder.name }) + (S.lastSync ? '　' + t('synced_at_time', { time: S.lastSync }) : '') }));
+      const label = t('folder_name_2', { name: S.folder.name });
+      // 有地址时，文件夹名就是复制地址的地方，悬停显示完整地址
+      if (S.folder.path) box.append(h('button', { type: 'button', class: 'link folder-path', title: S.folder.path, onclick() { copyThen(kit, S.folder.path); } }, label));
+      else box.append(h('span', { class: 'muted', text: label }));
+      if (S.lastSync) box.append(h('span', { class: 'muted', text: t('synced_at_time', { time: S.lastSync }) }));
       if (S.folder.path) {
         const planBtn = h('button', { type: 'button', class: 'btn sm', title: t('switch_or_create_a_plan'), onclick() { openPlanMenu(planBtn); } }, S.folder.file + ' ▾');
-        box.append(planBtn);
-        box.append(h('button', { type: 'button', class: 'btn sm', title: S.folder.path, onclick() { copyThen(kit, S.folder.path); } }, t('copy_path')),
-          h('span', { class: 'muted', text: t('handy_for_opening_a_cli') }));
+        box.append(planBtn, h('span', { class: 'muted', text: t('handy_for_opening_a_cli') }));
       }
     }
   }

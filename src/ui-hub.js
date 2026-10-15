@@ -20,15 +20,13 @@ function folderRows(container, o) {
         : null;
       const info = h('div', { class: 'finfo' },
         h('div', { class: 'fname' }, h('span', { text: x.name }), x.active ? h('span', { class: 'badge', text: t('in_use') }) : null),
-        h('div', { class: 'fpath', text: x.path }),
+        h('button', { type: 'button', class: 'fpath', title: t('copy_path'), 'aria-label': t('copy_path') + '：' + x.path, onclick: () => copyThen(o.kit, x.path) }, x.path),
         planBtn,
         s ? h('div', { class: 'muted', text: t('done_of_total_done_n_left_to_fill_in', { done: s.done, total: s.total, n: s.pending }) }) : h('div', { class: 'muted', text: t('no_plan_yet') }));
       const isCur = o.current && o.current.toLowerCase() === x.path.toLowerCase();
       if (isCur) info.firstChild.append(h('span', { class: 'badge', text: t('current') }));
       // 整个框都可以点击打开；框里的按钮（复制地址、换计划书）各管各的
-      const el = h('div', { class: 'frow' + (isCur ? ' cur' : ''), role: 'button', tabindex: 0, 'aria-label': x.name }, info,
-        h('div', { class: 'factions' },
-          h('button', { type: 'button', class: 'btn sm', onclick: () => copyThen(o.kit, x.path) }, t('copy_path'))));
+      const el = h('div', { class: 'frow' + (isCur ? ' cur' : ''), role: 'button', tabindex: 0, 'aria-label': x.name }, info);
       el.addEventListener('click', (e) => { if (!e.target.closest('button, a')) o.onPick(x.path); });
       el.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); o.onPick(x.path); } });
       return el;

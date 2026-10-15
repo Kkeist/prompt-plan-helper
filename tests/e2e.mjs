@@ -36,7 +36,7 @@ const MOCK_FS = `
   };
   FileH.prototype.createWritable = function () {
     var path = this.path; var buf = '';
-    return Promise.resolve({ write: function (d) { buf = d; return Promise.resolve(); }, close: function () { files[path] = buf; return Promise.resolve(); } });
+    return Promise.resolve({ write: function (d) { buf = d; return Promise.resolve(); }, close: function () { files[path] = buf; window.__writes = (window.__writes || 0) + 1; return Promise.resolve(); } });
   };
   function DirH(prefix, name) { this.kind = 'directory'; this.prefix = prefix; this.name = name; }
   DirH.prototype.getFileHandle = function (n, o) {
@@ -237,6 +237,13 @@ try {
   const t0 = Date.now();
   await H.wait(async () => /已完成 2 \/ 3/.test((await H.text('.status-head .muted')) || ''), 80);
   ok('文件夹里的进度一改，页面几秒内自动更新', /已完成 2 \/ 3/.test((await H.text('.status-head .muted')) || '') && Date.now() - t0 < 6500, Date.now() - t0);
+  // 没有变化就不写文件；文件夹里被清空不算最新
+  const w0 = await page.eval('window.__writes || 0');
+  await page.sleep(4200);
+  ok('没有改动时不重复写文件', (await page.eval('window.__writes || 0')) === w0, [w0, await page.eval('window.__writes || 0')]);
+  await page.eval('__fs["plan.md"] = ""');
+  await H.wait(async () => (await page.eval('(__fs["plan.md"] || "").length')) > 50, 90);
+  ok('文件夹里的计划书被清空：页面内容保留，并写回文件夹', (await page.eval('(__fs["plan.md"] || "").length')) > 50 && (await H.exists('.status-head h2')), await page.eval('(__fs["plan.md"] || "").length'));
 
   console.log('各屏幕宽度');
   for (const [w, hh] of [[1280, 800], [820, 1100], [390, 844], [320, 640], [280, 560]]) {
@@ -304,7 +311,7 @@ try {
   ok('标出「使用中」', await HW.exists('.badge', '使用中'));
   ok('显示完整地址', (await HW.text('.fpath')) === projDir, await HW.text('.fpath'));
   ok('显示进度摘要', /已完成 1 \/ 2，待补 0 处/.test((await HW.text('.frow .muted')) || ''), await HW.text('.frow .muted'));
-  ok('最近里只写「复制地址」，不写「方便打开 CLI」', (await HW.exists('.frow button', '复制地址', true)) && !/方便打开 CLI/.test(await win.eval('__one(".frow").textContent')));
+  ok('最近里地址文字本身就是复制的地方，没有单独的复制按钮', (await HW.exists('.frow button.fpath')) && !(await HW.exists('.frow .btn')) && !/方便打开 CLI/.test(await win.eval('__one(".frow").textContent')));
   ok('界面里没有 Claude 字样', !/Claude/.test(await win.eval('__one(".app").textContent')));
   const sizeAtOpen = JSON.stringify(await win.eval('window.__sizeCalls'));
   ok('打开时只设置一次小窗口大小和位置', /^\[\["resize",360,480\],\["move",\d+,\d+\]\]$/.test(sizeAtOpen), sizeAtOpen);
@@ -314,7 +321,7 @@ try {
   await HW.wait(async () => HW.exists('.status-box'), 40);
   ok('点打开计划书：在新标签里打开', (await HW.exists('.tabbar .tab .tab-name', '番茄钟（示例）')) || (await HW.count('.tabbar .tab')) === 1, await HW.text('.tabbar'));
   ok('读到了 plan.md 的内容', /番茄钟/.test((await HW.text('.title')) || ''), await HW.text('.title'));
-  ok('显示文件夹名和复制地址', (await HW.exists('.statusline button', '复制地址', true)) && (await HW.exists('.statusline .muted', '方便打开 CLI')));
+  ok('文件夹名就是复制地址的地方', (await HW.exists('.statusline button.folder-path')) && !(await HW.exists('.statusline button', '复制地址', true)) && (await HW.exists('.statusline .muted', '方便打开 CLI')));
   await win.click(Q('.status-row:nth-of-type(4) .prog'));
   await sleep(900);
   ok('点进度后，磁盘上的 plan.md 改了', /进度：已完成/.test(readFileSync(join(projDir, 'plan.md'), 'utf8').split('### 4.2')[1] || ''));
@@ -356,11 +363,11 @@ try {
   await setPick({ path: emptyDir, name: '空文件夹' });
   await win.click(Q('.statusline button', '保存到文件夹', true));
   await win.click(Q('.pop button', '选择已有文件夹', true));
-  await HW.wait(async () => HW.exists('.statusline .muted', '文件夹：空文件夹'), 40);
-  ok('保存到文件夹：显示文件夹名', await HW.exists('.statusline .muted', '文件夹：空文件夹'));
+  await HW.wait(async () => HW.exists('.statusline button.folder-path', '文件夹：空文件夹'), 40);
+  ok('保存到文件夹：显示文件夹名', await HW.exists('.statusline button.folder-path', '文件夹：空文件夹'));
   await sleep(500);
   ok('保存到文件夹：文件夹里写出了 plan.md', existsSync(join(emptyDir, 'plan.md')) && /计划书/.test(readFileSync(join(emptyDir, 'plan.md'), 'utf8')));
-  ok('保存到文件夹：可以复制地址', await HW.exists('.statusline button', '复制地址', true));
+  ok('保存到文件夹：可以复制地址', await HW.exists('.statusline button.folder-path'));
 
   // 保存到已有计划书的文件夹：不直接覆盖，选「用文件夹里的」
   await goHub();
@@ -438,12 +445,12 @@ try {
   await win.eval(dropJs('番茄钟项目', ['plan.md']));
   await HW.wait(async () => HW.exists('.tabbar .tab.on .tab-name', '番茄钟（示例）'), 60);
   ok('拖入文件夹：按名字找到地址并打开', await HW.exists('.tabbar .tab.on .tab-name', '番茄钟（示例）'), await HW.text('.tabbar'));
-  ok('拖入文件夹：可以复制地址', await HW.exists('.statusline button', '复制地址', true));
+  ok('拖入文件夹：可以复制地址', await HW.exists('.statusline button.folder-path'));
   await goHub();
   await win.eval(dropJs('不存在的文件夹名', []));
   await HW.wait(async () => HW.exists('.tabbar .tab .tab-name', '不存在的文件夹名'), 60);
   ok('拖入文件夹：找不到地址时也能打开，并说明', (await HW.exists('.tabbar .tab .tab-name', '不存在的文件夹名')) && /没有找到这个文件夹的地址/.test((await HW.text('.toast')) || ''), await HW.text('.toast'));
-  ok('拖入文件夹：没有地址时不显示复制地址', !(await HW.exists('.statusline button', '复制地址', true)));
+  ok('拖入文件夹：没有地址时没有复制入口', !(await HW.exists('.statusline button.folder-path')));
   ok('拖入和新建之后窗口大小仍没变', JSON.stringify(await win.eval('window.__sizeCalls')) === sizeAtOpen, await win.eval('window.__sizeCalls'));
   await win.shot(join(shots, '10-拖入文件夹-420.png'));
 
@@ -534,6 +541,13 @@ try {
 } catch (e) {
   fails.push('测试中断：' + (e && e.stack ? e.stack : e));
   console.log('中断：' + (e && e.stack ? e.stack : e));
+
+  console.log('标签放不下时换行，每个标签都完整显示');
+  await page.resize(280, 560);
+  for (let n = 0; n < 4; n++) { await page.click(Q('.tabbar .chip.add')); await page.sleep(120); }
+  const tabInfo = await page.eval('(function(){var bar=__one(".tabbar");var vw=innerWidth;var rs=Array.from(__deep(".tabbar .tab, .tabbar .chip")).map(function(e){var r=e.getBoundingClientRect();return {l:r.left,r:r.right}});return {n:rs.length,inside:rs.every(function(r){return r.l>=-0.5&&r.r<=vw+0.5}),hscroll:bar.scrollWidth-bar.clientWidth}})()');
+  ok('标签多了换行：每个都完整在窗口里，没有横向滚动', tabInfo.n >= 5 && tabInfo.inside && tabInfo.hscroll <= 0, tabInfo);
+  await page.shot(join(shots, '12-标签换行-280.png'));
 } finally {
   await chrome.close();
   staticSrv.kill();
