@@ -15,7 +15,7 @@ export function usedKeys() {
     for (const m of s.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)) keys.add(m[1].replace(/\\'/g, "'"));
   });
   // 动态拼出来的词条
-  ['加用法', '加界面', '加功能'].forEach((k) => keys.add(k));
+  ['加用法', '加页面', '加功能'].forEach((k) => keys.add(k));
   return [...keys];
 }
 

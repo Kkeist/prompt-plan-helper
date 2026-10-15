@@ -1,7 +1,7 @@
 {
-  "name": "薯片计划助手",
-  "short_name": "薯片计划",
-  "description": "做之前先写好计划书，提修改时对标到计划书。",
+  "name": "prompt 计划书助手",
+  "short_name": "计划书助手",
+  "description": "帮助新项目计划书的书写模板。A plan template helper for new projects.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

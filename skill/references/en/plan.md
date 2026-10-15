@@ -12,12 +12,12 @@ What they get from it:
 
 〈One line per way of using it: the user does something → sees something → does the next thing〉
 
-## 3 Screens
+## 3 Pages
 
-### 3.1 〈Screen name〉
+### 3.1 〈Page name〉
 
-What this screen is for:
-What is on the screen:
+What this page is for:
+What is on the page:
 - 〈Name of a thing〉: what it is; what happens when it is clicked or touched
 How the user gets here:
 
@@ -35,12 +35,18 @@ Progress: Not started
 
 - 〈Name of the information〉: what it contains; whether it should still be there next time
 
-## 6 Look and requirements
+## 6 Style
 
-Where it is used:
-Look and feel:
+Style you want:
 Anything to refer to:
 Must not have:
+
+## 7 Use and requirements
+
+Where it is used:
+Which languages:
+Where images, texts and sounds come from:
+Accounts or sign-in:
 Anything else:
 
 ## Original description

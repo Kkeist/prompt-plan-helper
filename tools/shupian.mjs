@@ -38,11 +38,11 @@ function check(arg) {
   console.log('文件：' + path);
   console.log('项目：' + (Core.titleName(md) || '（未命名）'));
   console.log('状态：' + (Core.statusLabel(Core.getStatus(md), Core.docLang(md)) || '（没有状态行）'));
-  console.log('界面 ' + s.pages.length + ' 个，功能 ' + s.features.length + ' 个');
+  console.log('页面 ' + s.pages.length + ' 个，功能 ' + s.features.length + ' 个');
   console.log('待补：' + total + ' 处');
   list.forEach((x) => console.log('  第 ' + (x.line + 1) + ' 行　' + x.text));
   const problems = [];
-  dup(s.pages).forEach((n) => problems.push('界面重名：' + n));
+  dup(s.pages).forEach((n) => problems.push('页面重名：' + n));
   dup(s.features).forEach((n) => problems.push('功能重名：' + n));
   if (Core.getStatus(md) === 'approved' && total > 0) problems.push('状态是已通过，但还有待补');
   problems.forEach((p) => console.log('问题：' + p));
@@ -114,9 +114,9 @@ async function app(view) {
   if (!(info && info.port)) { console.error('桌面服务没有启动。'); process.exit(2); }
   const exe = browserPath();
   const hub = view !== 'plan';
-  const url = 'http://127.0.0.1:' + info.port + '/index.html?k=' + info.token + (hub ? '&view=hub' : '');
+  const url = 'http://127.0.0.1:' + info.port + '/index.html?k=' + info.token + '&win=1' + (hub ? '&view=hub' : '');
   if (!exe) { console.error('没有找到 Edge 或 Chrome，请直接打开：' + url); process.exit(2); }
-  spawn(exe, ['--app=' + url, hub ? '--window-size=420,640' : '--window-size=980,820'], { detached: true, stdio: 'ignore' }).unref();
+  spawn(exe, ['--app=' + url, hub ? '--window-size=360,480' : '--window-size=980,820'], { detached: true, stdio: 'ignore' }).unref();
   console.log('已打开：' + url.replace(info.token, '***'));
 }
 

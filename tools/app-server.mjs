@@ -132,6 +132,7 @@ export function startServer() {
 
   const server = createServer(async (req, res) => {
     lastUse = Date.now();
+    if (process.env.SHUPIAN_DEBUG) console.log(new Date().toTimeString().slice(0, 8), req.method, req.url.split('?')[0]);
     const json = (code, obj) => {
       res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(obj));
@@ -213,6 +214,12 @@ export function startServer() {
       port = p;
       mkdirSync(STATE_DIR, { recursive: true });
       writeFileSync(STATE_FILE, JSON.stringify({ port, token, pid: process.pid }));
+      // 调试：在控制台打印地址和每个请求；SHUPIAN_OPEN 时用默认浏览器打开
+      if (process.env.SHUPIAN_DEBUG) {
+        const url = 'http://127.0.0.1:' + port + '/index.html?k=' + token;
+        console.log('debug server: ' + url);
+        if (process.env.SHUPIAN_OPEN) spawn('cmd', ['/c', 'start', '""', url], { stdio: 'ignore', windowsHide: true });
+      }
     });
   };
   const start = Number(process.env.PORT) || basePort() + 100;

@@ -26,6 +26,9 @@ function parseFieldTable(md) {
   return fields;
 }
 
+// 中文示例就是这个项目自己的计划书，以根目录的计划书为准
+copyFileSync(join(root, '计划书.md'), join(root, 'templates', 'zh', 'example.md'));
+
 const schema = {};
 ['zh', 'en'].forEach((lang) => {
   schema[lang] = {

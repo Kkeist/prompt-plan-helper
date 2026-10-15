@@ -1,5 +1,7 @@
-# Creates a Desktop shortcut with a global hotkey that opens the small project window.
-# The shortcut runs tools\launch.vbs (no console window), which starts the local service and the window.
+# Creates a Desktop shortcut for the desktop helper.
+# - If the desktop exe was built (web\download\prompt-plan-helper.exe) the shortcut starts it; the exe sits in the tray
+#   and registers the Ctrl+Alt+S hotkey itself.
+# - Otherwise the shortcut runs tools\launch.vbs (Node version, no console window) and carries the hotkey.
 # Usage:  powershell -ExecutionPolicy Bypass -File tools\install-shortcut.ps1 [-Hotkey "CTRL+ALT+S"] [-Remove]
 param(
   [string]$Hotkey = 'CTRL+ALT+S',
@@ -24,21 +26,27 @@ if ($Remove) {
 }
 
 $root = Split-Path -Parent $PSScriptRoot
+$exe = Join-Path $root 'web\download\prompt-plan-helper.exe'
 $vbs = Join-Path $root 'tools\launch.vbs'
-if (-not (Test-Path $vbs)) { throw "tools\launch.vbs not found: $vbs" }
 
 $shell = New-Object -ComObject WScript.Shell
 $lnk = $shell.CreateShortcut($lnkPath)
-$lnk.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
-$lnk.Arguments = '//nologo "' + $vbs + '"'
+if (Test-Path $exe) {
+  $lnk.TargetPath = $exe
+  $lnk.Arguments = ''
+  $lnk.Hotkey = ''
+} else {
+  if (-not (Test-Path $vbs)) { throw "tools\launch.vbs not found: $vbs" }
+  $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
+  $lnk.Arguments = '//nologo "' + $vbs + '"'
+  $lnk.Hotkey = $Hotkey
+}
 $lnk.WorkingDirectory = $root
 $lnk.IconLocation = (Join-Path $root 'web\shupian.ico') + ',0'
-$lnk.Hotkey = $Hotkey
 $lnk.Description = $name
 $lnk.Save()
 
 $check = $shell.CreateShortcut($lnkPath)
 Write-Output "created: $lnkPath"
 Write-Output "hotkey:  $($check.Hotkey)"
-Write-Output "icon:    $($check.IconLocation)"
 Write-Output "target:  $($check.TargetPath) $($check.Arguments)"

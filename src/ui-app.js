@@ -2,7 +2,7 @@
 // 计划书页：项目情况、点一块直接修改、文件夹同步、导入导出。
 
 const PLAN_NAMES = ['plan.md', '计划书.md'];
-const ADD_LABEL = { 2: '加用法', 3: '加界面', 4: '加功能' };
+const ADD_LABEL = { 2: '加用法', 3: '加页面', 4: '加功能' };
 
 function docLangOf(md) {
   return md && md.trim() ? Core.docLang(md) : LANG;
@@ -18,20 +18,36 @@ function newId() {
 }
 
 function nameError(code, kind) {
-  const what = kind === 'page' ? t('界面') : t('功能');
+  const what = kind === 'page' ? t('页面') : t('功能');
   if (code === 'empty') return t('{what}名称不能为空。', { what });
   if (code === 'duplicate') return t('已有同名{what}，请换一个名称。', { what });
   return t('没有找到可以添加的位置。');
 }
 
+// 桌面窗口：最近标签用小窗口贴在屏幕右下角，计划书标签用大窗口放在中间
+const WINDOW_MODE = !!SERVER && new URLSearchParams(location.search).get('win') === '1';
+
+function placeWindow(small) {
+  if (!WINDOW_MODE) return;
+  const w = small ? 360 : 980;
+  const hh = small ? 480 : 820;
+  const sw = screen.availWidth;
+  const sh = screen.availHeight;
+  window.resizeTo(w, hh);
+  if (small) window.moveTo((screen.availLeft || 0) + sw - w - 12, (screen.availTop || 0) + sh - hh - 12);
+  else window.moveTo((screen.availLeft || 0) + Math.max(0, Math.round((sw - w) / 2)), (screen.availTop || 0) + Math.max(0, Math.round((sh - hh) / 2)));
+}
+
 function createApp(opts) {
   const root = opts.root;
-  const index = LS.get(NS + ':index', null) || { current: '', list: [] };
+  const index = LS.get(NS + ':index', null) || { current: '', list: [], open: [] };
+  if (!index.open) index.open = [];
   const S = {
     md: '',
     past: [],
     future: [],
     collapsed: {},
+    view: 'plan',
     project: null,
     folder: { state: Folder.supported() ? 'none' : 'off', handle: null, name: '', path: '', synced: '', hold: false, file: PLAN_NAMES[0] },
     lastSync: '',
@@ -69,7 +85,7 @@ function createApp(opts) {
   }
 
   function persist() {
-    if (!LS.set(projectKey(S.project.id), { md: S.md, updated: Date.now() })) toast(t('浏览器存储已满，最近的修改没有保存。可以先导出。'));
+    if (!LS.set(projectKey(S.project.id), { md: S.md, updated: Date.now() })) toast(t('浏览器存储空间已满，最近的修改未保存，请先导出。'));
     const nm = Core.titleName(S.md);
     if (nm && S.project.name !== nm) {
       S.project.name = nm;
@@ -87,17 +103,33 @@ function createApp(opts) {
     let cur = index.list.filter((p) => p.id === index.current)[0];
     if (!cur) { cur = index.list[0]; index.current = cur.id; saveIndex(); }
     S.project = cur;
+    if (index.open.indexOf(cur.id) < 0) index.open.push(cur.id);
+    index.open = index.open.filter((id) => index.list.some((p) => p.id === id));
+    saveIndex();
     loadProject(cur.id);
     folderInit();
+    // 有桌面服务时，窗口一打开先看最近的文件夹
+    if (SERVER && !opts.folder && (new URLSearchParams(location.search).get('view') === 'hub' || WINDOW_MODE)) {
+      S.view = 'hub';
+      // 还没写过内容、也没连文件夹的空项目不占标签
+      if (!S.md.trim() && !S.project.path) {
+        index.open = index.open.filter((id) => id !== S.project.id);
+        saveIndex();
+      }
+    }
   }
 
+  // 打开一个项目：加到标签里并切过去
   function useProject(p) {
     S.project = p;
+    S.view = 'plan';
     index.current = p.id;
+    if (index.open.indexOf(p.id) < 0) index.open.push(p.id);
     saveIndex();
     loadProject(p.id);
     folderInit();
     renderAll();
+    placeWindow(false);
   }
 
   function switchProject(id) {
@@ -113,12 +145,36 @@ function createApp(opts) {
     useProject(p);
   }
 
+  function showHub() {
+    persist();
+    S.view = 'hub';
+    renderAll();
+    placeWindow(true);
+  }
+
+  // 关掉一个标签：项目还在，可以从「更多」里再打开
+  function closeTab(id) {
+    persist();
+    const at = index.open.indexOf(id);
+    if (at < 0) return;
+    index.open.splice(at, 1);
+    saveIndex();
+    if (S.view === 'plan' && S.project.id === id) {
+      const nextId = index.open[Math.min(at, index.open.length - 1)];
+      const p = index.list.filter((x) => x.id === nextId)[0];
+      if (p) useProject(p);
+      else if (SERVER) showHub();
+      else createProject();
+    } else renderAll();
+  }
+
   function deleteProject(id) {
     const p = index.list.filter((x) => x.id === id)[0];
     if (!p) return;
     const rec = LS.get(projectKey(id), null);
     const pos = index.list.indexOf(p);
     index.list.splice(pos, 1);
+    index.open = index.open.filter((x) => x !== id);
     LS.del(projectKey(id));
     if (!index.list.length) index.list.push({ id: newId(), name: t('新项目') });
     if (index.current === id) useProject(index.list[0]);
@@ -234,16 +290,16 @@ function createApp(opts) {
   }
 
   async function folderConnect() {
-    if (SERVER) { openFolders(); return; }
+    if (SERVER) { showHub(); return; }
     let handle;
     try {
       handle = await Folder.pick();
     } catch (e) {
       if (e && e.name === 'AbortError') return;
-      toast(t('没有打开文件夹：{why}', { why: errText(e) }));
+      toast(t('无法打开文件夹：{why}', { why: errText(e) }));
       return;
     }
-    try { await kvSet('handle:' + NS + ':' + S.project.id, handle); } catch (e) { toast(t('授权没有记住，下次打开需要重新选择文件夹。')); }
+    try { await kvSet('handle:' + NS + ':' + S.project.id, handle); } catch (e) { toast(t('未能保存文件夹授权，下次打开需要重新选择文件夹。')); }
     await connectHandle(handle);
   }
 
@@ -253,7 +309,7 @@ function createApp(opts) {
     try {
       r = await Api.call('POST', '/api/connect', { path });
     } catch (e) {
-      toast(t('没有打开文件夹：{why}', { why: errText(e) }));
+      toast(t('无法打开文件夹：{why}', { why: errText(e) }));
       return;
     }
     let p = index.list.filter((x) => x.path && x.path.toLowerCase() === r.path.toLowerCase())[0];
@@ -273,7 +329,7 @@ function createApp(opts) {
       renderAll();
       if (ok) await folderPull(true, false);
     } catch (e) {
-      toast(t('授权没有完成：{why}', { why: errText(e) }));
+      toast(t('授权未完成：{why}', { why: errText(e) }));
     }
   }
 
@@ -311,7 +367,7 @@ function createApp(opts) {
     const text = found.text;
     if (text == null) {
       if (S.md.trim()) await folderPush();
-      else if (manual) toast(t('文件夹里还没有计划书。'));
+      else if (manual) toast(t('文件夹中尚无计划书。'));
       return;
     }
     if (text === S.md) {
@@ -325,7 +381,7 @@ function createApp(opts) {
       commit(text, true);
       S.lastSync = clockText();
       renderAll();
-      if (!silent) toast(t('已读入文件夹里的计划书。'), { label: t('撤销'), run: () => { undo(); folderPush(); } });
+      if (!silent) toast(t('已载入文件夹中的计划书。'), { label: t('撤销'), run: () => { undo(); folderPush(); } });
       return;
     }
     if (text === S.folder.synced) { await folderPush(); return; }
@@ -342,39 +398,20 @@ function createApp(opts) {
     S.folder.hold = true;
     const release = () => { S.folder.hold = false; };
     kit.openModal({
-      title: t('文件夹里的计划书不一样'),
-      body: h('p', { class: 'p', text: t('页面里和文件夹里的计划书都有改动，选择保留哪一份。另一份可以在撤销里找回。') }),
+      title: t('文件夹中的计划书与页面不一致'),
+      body: h('p', { class: 'p', text: t('页面和文件夹中的计划书都有修改，请选择保留哪一份。另一份可通过撤销找回。') }),
       onClose: release,
       foot: (close) => [
-        h('button', { type: 'button', class: 'btn', onclick() { release(); close(); } }, t('先不处理')),
-        h('button', { type: 'button', class: 'btn', onclick() { release(); close(); folderPush(); } }, t('用页面里的')),
+        h('button', { type: 'button', class: 'btn', onclick() { release(); close(); } }, t('稍后处理')),
+        h('button', { type: 'button', class: 'btn', onclick() { release(); close(); folderPush(); } }, t('保留页面中的')),
         h('button', { type: 'button', class: 'btn primary', onclick() {
           release(); close();
           S.folder.synced = fileText;
           commit(fileText, true);
           renderAll();
-        } }, t('用文件夹里的')),
+        } }, t('保留文件夹中的')),
       ],
     });
-  }
-
-  // 本机服务打开时的文件夹列表：最近在用 Claude 的、连接过的、别的
-  function openFolders() {
-    const box = h('div', { class: 'folders' });
-    folderRows(box, {
-      kit,
-      current: S.folder.path,
-      onPick: (path) => { m.close(); connectFolderPath(path); },
-      onBrowse: async () => {
-        try {
-          const r = await Api.call('POST', '/api/pick', {});
-          if (r.path) { m.close(); connectFolderPath(r.path); }
-        } catch (e) {
-          toast(t('没有打开文件夹：{why}', { why: errText(e) }));
-        }
-      },
-    });
-    const m = kit.openModal({ title: t('选择文件夹'), body: box });
   }
 
   // ---------- 文字显示 ----------
@@ -472,7 +509,7 @@ function createApp(opts) {
     const paint = () => {
       clear(el);
       const text = Core.bodyText(Core.split(S.md), at());
-      if (!text.trim()) el.append(h('div', { class: 'hint-note' }, t('点这里填写。')), h('pre', { class: 'hint-lines', text: sectionHint(S.md, sec) }));
+      if (!text.trim()) el.append(h('div', { class: 'hint-note' }, t('点击填写。')), h('pre', { class: 'hint-lines', text: sectionHint(S.md, sec) }));
       else el.append(renderLines(text, nums, docLangOf(S.md)));
     };
     const edit = () => {
@@ -553,17 +590,66 @@ function createApp(opts) {
   }
 
   // 项目情况：每个功能做什么、做到哪一步
+  // 写问题的小弹窗：问题记在某个功能下面；输入 @ 可以换功能
+  function openIssue(featureLine) {
+    const feats = Core.issueList(S.md);
+    if (!feats.length) return;
+    let target = feats.filter((f) => f.featureLine === featureLine)[0] || feats[0];
+    const label = h('button', { type: 'button', class: 'btn sm target', title: t('点击更换功能') });
+    const ta = h('textarea', { class: 'in', rows: 4, placeholder: t('说明遇到的问题，输入 @ 选择功能。'), 'aria-label': t('问题说明') });
+    const paintLabel = () => { label.textContent = '@ ' + (target.no ? target.no + ' ' : '') + target.name; };
+    const choose = (anchor, after) => kit.openPop(anchor, (pop, close) => {
+      feats.forEach((f) => pop.append(h('button', { type: 'button', class: f === target ? 'on' : '', onclick() {
+        target = f;
+        paintLabel();
+        close();
+        if (after) after();
+      } }, (f.no ? f.no + ' ' : '') + f.name)));
+    });
+    label.addEventListener('click', () => choose(label));
+    ta.addEventListener('input', () => {
+      autoGrow(ta);
+      if (/@$/.test(ta.value)) {
+        ta.value = ta.value.slice(0, -1);
+        choose(ta, () => ta.focus());
+      }
+    });
+    paintLabel();
+    kit.openModal({
+      title: t('写问题'),
+      small: true,
+      body: h('div', null, h('div', { class: 'field' }, label), ta),
+      foot: (close) => [
+        h('button', { type: 'button', class: 'btn', onclick: close }, t('取消')),
+        h('button', { type: 'button', class: 'btn primary', onclick() {
+          const r = Core.addIssue(S.md, target.featureLine, ta.value, Core.today());
+          if (!r.ok) { toast(t('请先写下问题。')); return; }
+          close();
+          commit(r.md);
+          renderAll();
+          toast(t('已添加问题。'));
+        } }, t('添加')),
+      ],
+    });
+    setTimeout(() => ta.focus(), 0);
+  }
+
+  // 项目情况（计划书阶段）和功能清单（确认之后）：每个功能做什么、做到哪一步，以及它下面的问题
   function renderProgress() {
     const list = Core.progressList(S.md);
     if (!list.length) return null;
     const lang = docLangOf(S.md);
     const W = Core.WORDS[lang].progress;
+    const building = Core.getStatus(S.md) === 'approved';
+    const issues = Core.issueList(S.md);
     const done = list.filter((x) => x.status === 'done').length;
     const doing = list.filter((x) => x.status === 'doing').length;
+    const open = issues.reduce((n, f) => n + f.items.filter((i) => !i.done).length, 0);
     const box = h('section', { class: 'status-box' });
     box.append(h('div', { class: 'status-head' },
-      h('h2', { text: t('项目情况') }),
-      h('span', { class: 'muted', text: t('已完成 {done} / {total}，进行中 {doing}', { done, total: list.length, doing }) })));
+      h('h2', { text: building ? t('功能清单') : t('项目情况') }),
+      h('span', { class: 'muted', text: t('已完成 {done} / {total}，进行中 {doing}', { done, total: list.length, doing }) + (open ? '　' + t('未处理的问题 {n} 条', { n: open }) : '') }),
+      building ? h('button', { type: 'button', class: 'btn sm', onclick: () => openIssue(list[0].line) }, '＋ ' + t('写问题')) : null));
     box.append(h('div', { class: 'bar-track' },
       h('span', { class: 'bar-done', style: 'width:' + (done / list.length) * 100 + '%' }),
       h('span', { class: 'bar-doing', style: 'width:' + (doing / list.length) * 100 + '%' })));
@@ -573,11 +659,24 @@ function createApp(opts) {
         commit(Core.setProgress(S.md, f.line, Core.nextProgress(f.status)));
         renderAll();
       });
+      const mine = (issues.filter((x) => x.featureLine === f.line)[0] || { items: [] }).items;
+      const openItems = mine.filter((i) => !i.done);
       box.append(h('div', { class: 'status-row' },
         h('div', { class: 'status-name' },
           h('button', { type: 'button', class: 'ref', onclick() { jumpTo('[data-no="' + f.no + '"]'); } }, (f.no ? f.no + ' ' : '') + f.name),
           f.what ? h('span', { class: 'muted', text: f.what }) : null),
+        building ? h('button', { type: 'button', class: 'btn sm', title: t('写问题'), 'aria-label': t('写问题'), onclick: () => openIssue(f.line) }, '＋') : null,
         chip));
+      openItems.forEach((it) => {
+        box.append(h('div', { class: 'issue' },
+          h('button', { type: 'button', class: 'btn sm', title: t('标记为已修'), onclick() { commit(Core.setIssueDone(S.md, it.line, true)); renderAll(); } }, t('已修')),
+          h('span', { class: 'issue-text', text: it.text }),
+          h('button', { type: 'button', class: 'x', title: t('删除'), 'aria-label': t('删除'), onclick() {
+            commit(Core.join(Core.deleteSubtree(Core.split(S.md), it.line)));
+            renderAll();
+            toast(t('已删除。'), { label: t('撤销'), run: () => undo() });
+          } }, '✕')));
+      });
     });
     return box;
   }
@@ -602,8 +701,9 @@ function createApp(opts) {
     hs.forEach((x, idx) => {
       if (x.level === 2) {
         const no = (/^(\d+)\b/.exec(x.body) || [])[1] || '';
-        const secEl = h('section', { class: 'sec' + (S.collapsed[x.body] ? ' closed' : ''), 'data-line': x.line, 'data-no': no });
-        const fold = h('button', { type: 'button', class: 'fold', 'aria-label': t('展开或收起') }, S.collapsed[x.body] ? '▸' : '▾');
+        const closedNow = S.collapsed[x.body] !== undefined ? S.collapsed[x.body] : Core.getStatus(S.md) === 'approved';
+        const secEl = h('section', { class: 'sec' + (closedNow ? ' closed' : ''), 'data-line': x.line, 'data-no': no });
+        const fold = h('button', { type: 'button', class: 'fold', 'aria-label': t('展开或收起') }, closedNow ? '▸' : '▾');
         fold.addEventListener('click', () => {
           const closed = secEl.classList.toggle('closed');
           S.collapsed[x.body] = closed;
@@ -622,7 +722,7 @@ function createApp(opts) {
               const r = Core.addFlowLine(S.md);
               if (r.ok) { commit(r.md); afterAdd(x.line); }
             } }, '＋ ' + t(ADD_LABEL[no])))
-            : nameSlot(t(ADD_LABEL[no]), no === '3' ? t('界面名称') : t('功能名称'), (name) => {
+            : nameSlot(t(ADD_LABEL[no]), no === '3' ? t('页面名称') : t('功能名称'), (name) => {
               const kind = no === '3' ? 'page' : 'feature';
               const r = Core.addBlock(S.md, kind, name);
               if (!r.ok) return { ok: false, error: nameError(r.code, kind) };
@@ -664,18 +764,18 @@ function createApp(opts) {
   }
 
   function exportPlan() {
-    if (!S.md.trim()) { toast(t('还没有内容可以导出。')); return; }
+    if (!S.md.trim()) { toast(t('没有可导出的内容。')); return; }
     const base = (S.project.name || 'plan').replace(/[\\/:*?"<>|\s]+/g, '-');
     toast(t('已导出：{name}', { name: download(exportText(), base, 'md') }));
   }
 
   function openImport() {
-    const ta = h('textarea', { class: 'in big', placeholder: t('把写好的计划书粘贴在这里，或选择文件。'), 'aria-label': t('导入内容') });
+    const ta = h('textarea', { class: 'in big', placeholder: t('粘贴计划书内容，或选择文件。'), 'aria-label': t('导入内容') });
     const file = h('input', { type: 'file', accept: '.md,.txt,text/markdown,text/plain', style: 'position:fixed;left:0;top:0;opacity:0;width:1px;height:1px' });
     file.addEventListener('change', () => {
       const f = file.files && file.files[0];
       if (!f) return;
-      readText(f).then((txt) => { ta.value = txt; autoGrow(ta); }, () => toast(t('这个文件读不出来，请确认是文本文件。')));
+      readText(f).then((txt) => { ta.value = txt; autoGrow(ta); }, () => toast(t('无法读取该文件，请确认它是文本文件。')));
     });
     app.append(file);
     kit.openModal({
@@ -704,7 +804,7 @@ function createApp(opts) {
         zh ? '## 未识别' : '## Not recognised', ''].concat(txt.split('\n')).join('\n');
       commit(wrapped, true);
       renderAll();
-      toast(t('没有认出计划书的格式，原文已放进「未识别」。'), { label: t('撤销'), run: () => undo() });
+      toast(t('未识别出计划书格式，原文已放入「未识别」。'), { label: t('撤销'), run: () => undo() });
       return;
     }
     commit(txt, true);
@@ -725,13 +825,13 @@ function createApp(opts) {
   }
 
   function openAiPrompt() {
-    const note = h('textarea', { class: 'in', rows: 3, placeholder: t('想做什么，随手写就行。'), 'aria-label': t('你的话') });
+    const note = h('textarea', { class: 'in', rows: 3, placeholder: t('描述要做的东西。'), 'aria-label': t('补充说明') });
     const out = h('textarea', { class: 'in big', readonly: true, 'aria-label': t('给 AI 的话') });
     const refresh = () => { out.value = Core.buildAiPrompt(S.md, SCHEMA, note.value, LANG); autoGrow(out); };
     note.addEventListener('input', () => { autoGrow(note); refresh(); });
     kit.openModal({
-      title: t('复制给 AI 的话'),
-      body: h('div', null, h('div', { class: 'field' }, h('div', { class: 'fl', text: t('你的话') }), note), h('div', { class: 'field' }, h('div', { class: 'fl', text: t('发给 AI 的内容') }), out)),
+      title: t('复制提示词'),
+      body: h('div', null, h('div', { class: 'field' }, h('div', { class: 'fl', text: t('补充说明') }), note), h('div', { class: 'field' }, h('div', { class: 'fl', text: t('提示词内容') }), out)),
       foot: (close) => [
         h('button', { type: 'button', class: 'btn', onclick: close }, t('关闭')),
         h('button', { type: 'button', class: 'btn primary', onclick() { copyThen(kit, out.value, out); } }, t('复制')),
@@ -769,13 +869,14 @@ function createApp(opts) {
         if (!r.ok) { toast(t('还有 {n} 处待补，补完才能通过。', { n: r.pending })); return; }
         commit(r.md, true);
         renderAll();
-        toast(t('计划书已通过，可以开始做。'));
-      } }, t('标记为已通过')));
+        toast(t('计划书已确认，可以开始制作。'));
+      } }, t('确认并开始')));
     }
     if (S.folder.state === 'ready') {
       box.append(h('span', { class: 'muted', text: t('文件夹：{name}', { name: S.folder.name }) + (S.lastSync ? '　' + t('同步于 {time}', { time: S.lastSync }) : '') }));
       if (S.folder.path) {
-        box.append(h('button', { type: 'button', class: 'btn sm', title: S.folder.path, onclick() { copyThen(kit, S.folder.path); } }, t('复制地址')));
+        box.append(h('button', { type: 'button', class: 'btn sm', title: S.folder.path, onclick() { copyThen(kit, S.folder.path); } }, t('复制地址')),
+          h('span', { class: 'muted', text: t('方便打开 CLI') }));
       }
     }
   }
@@ -798,37 +899,65 @@ function createApp(opts) {
       const has = S.md.trim() !== '';
       if (has) {
         add(t('目录'), () => openToc(anchor));
-        add(t('复制全文'), () => showText(kit, t('计划书全文'), exportText(), t('复制后发给 AI。')));
-        add(t('复制给 AI 的话'), openAiPrompt);
+        add(t('复制全文'), () => showText(kit, t('计划书全文'), exportText(), t('复制后发送给 AI。')));
+        add(t('复制提示词'), openAiPrompt);
         add(t('导出'), exportPlan);
         pop.append(h('hr'));
       }
-      add(t('看示例'), loadExample);
+      add(t('查看示例'), loadExample);
       add(t('新建空白计划书'), newBlank);
       add(t('导入'), openImport);
       if (has) {
-        add(t('撤销'), () => { if (!undo()) toast(t('没有可撤销的修改。')); });
-        add(t('重做'), () => { if (!redo()) toast(t('没有可重做的修改。')); });
+        add(t('撤销'), () => { if (!undo()) toast(t('没有可撤销的操作。')); });
+        add(t('重做'), () => { if (!redo()) toast(t('没有可重做的操作。')); });
       }
       pop.append(h('hr'));
-      if (f.state === 'off') add(t('文件夹功能需要电脑上的 Chrome 或 Edge'), () => {}, { disabled: true });
+      if (f.state === 'off') add(t('文件夹功能需要电脑版 Chrome 或 Edge'), () => {}, { disabled: true });
       else if (f.state === 'none') add(t('连接文件夹'), folderConnect);
       else if (f.state === 'need') add(t('重新授权文件夹'), folderRegrant);
       else {
-        if (SERVER) add(t('换一个文件夹'), openFolders);
         add(t('刷新'), () => folderPull(true, false));
         add(t('断开文件夹'), folderDisconnect);
       }
-      pop.append(h('hr'));
-      index.list.forEach((p) => {
-        pop.append(h('div', { class: 'row2' },
-          h('button', { type: 'button', class: p.id === S.project.id ? 'on' : '', onclick() { kit.closePop(); if (p.id !== S.project.id) switchProject(p.id); } }, p.name),
-          h('button', { type: 'button', class: 'x', title: t('删除项目'), onclick() { kit.closePop(); deleteProject(p.id); } }, '✕')));
-      });
-      add(t('新项目'), () => createProject());
-      pop.append(h('hr'));
-      add(LANG === 'zh' ? 'English' : '中文', () => { setLang(LANG === 'zh' ? 'en' : 'zh'); renderAll(); });
+      const closed = index.list.filter((p) => index.open.indexOf(p.id) < 0);
+      if (closed.length) {
+        pop.append(h('hr'));
+        closed.forEach((p) => {
+          pop.append(h('div', { class: 'row2' },
+            h('button', { type: 'button', onclick() { kit.closePop(); useProject(p); } }, p.name),
+            h('button', { type: 'button', class: 'x', title: t('删除项目'), onclick() { kit.closePop(); deleteProject(p.id); } }, '✕')));
+        });
+      }
+      if (!SERVER) {
+        pop.append(h('hr'));
+        pop.append(h('a', { class: 'menu-link', href: 'download/prompt-plan-helper.exe', download: 'prompt-plan-helper.exe', onclick() { kit.closePop(); } }, t('下载桌面版（Windows）')));
+      }
     });
+  }
+
+  function openLang(anchor) {
+    kit.openPop(anchor, (pop) => {
+      [['zh', '中文'], ['en', 'English']].forEach((x) => {
+        pop.append(kit.popItem(x[1], () => { setLang(x[0]); renderAll(); }, { on: LANG === x[0] }));
+      });
+    });
+  }
+
+  function renderTabs() {
+    const bar = h('div', { class: 'tabbar', role: 'tablist' });
+    if (SERVER) {
+      bar.append(h('button', { type: 'button', role: 'tab', class: 'chip' + (S.view === 'hub' ? ' on' : ''), onclick: showHub }, t('最近')));
+    }
+    index.open.forEach((id) => {
+      const p = index.list.filter((x) => x.id === id)[0];
+      if (!p) return;
+      const on = S.view === 'plan' && S.project.id === id;
+      bar.append(h('span', { class: 'tab' + (on ? ' on' : '') },
+        h('button', { type: 'button', role: 'tab', class: 'tab-name', onclick() { if (!on) switchProject(id); } }, p.name),
+        h('button', { type: 'button', class: 'tab-x', title: t('关闭标签'), 'aria-label': t('关闭标签'), onclick() { closeTab(id); } }, '✕')));
+    });
+    bar.append(h('button', { type: 'button', class: 'chip add', title: t('新项目'), 'aria-label': t('新项目'), onclick() { if (SERVER) showHub(); else createProject(); } }, '＋'));
+    return bar;
   }
 
   function renderHead() {
@@ -839,7 +968,27 @@ function createApp(opts) {
     head.append(h('div', { class: 'in' },
       h('span', { class: 'brand' }, logo, h('span', { class: 'brand-name', text: t('prompt 计划书助手') })),
       h('span', { class: 'sp' }),
+      h('button', { type: 'button', class: 'lang', title: t('语言'), 'aria-label': t('语言'), onclick(e) { openLang(e.currentTarget); } }, (LANG === 'zh' ? '中文' : 'English') + ' ▾'),
       h('button', { type: 'button', class: 'x more', title: t('更多'), 'aria-label': t('更多'), onclick(e) { openMenu(e.currentTarget); } }, '⋯')));
+    head.append(h('div', { class: 'in tabs-in' }, renderTabs()));
+  }
+
+  function renderHubView() {
+    const list = h('div', { class: 'folders' });
+    folderRows(list, {
+      kit,
+      current: S.project && S.project.path ? S.project.path : '',
+      onPick: (path) => connectFolderPath(path),
+      onBrowse: async () => {
+        try {
+          const r = await Api.call('POST', '/api/pick', {});
+          if (r.path) connectFolderPath(r.path);
+        } catch (e) {
+          toast(t('无法打开文件夹：{why}', { why: errText(e) }));
+        }
+      },
+    });
+    return h('div', { class: 'col' }, list);
   }
 
   function renderBody() {
@@ -847,12 +996,14 @@ function createApp(opts) {
     kit.closePop();
     clear(body);
     let content;
-    if (!S.md.trim()) {
+    if (S.view === 'hub') {
+      content = renderHubView();
+    } else if (!S.md.trim()) {
       content = h('div', { class: 'col' }, h('div', { class: 'empty' },
-        h('p', { text: t('还没有计划书。新建一份，看一份示例，或导入写好的计划书。') }),
+        h('p', { text: t('尚未创建计划书。可以新建、查看示例，或导入已有的计划书。') }),
         h('div', { class: 'row' },
           h('button', { type: 'button', class: 'btn primary', onclick: newBlank }, t('新建空白计划书')),
-          h('button', { type: 'button', class: 'btn', onclick: loadExample }, t('看示例')),
+          h('button', { type: 'button', class: 'btn', onclick: loadExample }, t('查看示例')),
           h('button', { type: 'button', class: 'btn', onclick: () => openImport() }, t('导入')),
           Folder.supported() && S.folder.state !== 'ready' ? h('button', { type: 'button', class: 'btn', onclick: folderConnect }, t('连接文件夹')) : null)));
     } else {
@@ -884,12 +1035,12 @@ function createApp(opts) {
     if (k === 's') {
       e.preventDefault();
       if (S.folder.state === 'ready') folderPush().then(() => toast(t('已保存。')));
-      else toast(t('已保存在浏览器里。'));
+      else toast(t('已保存到浏览器。'));
       return;
     }
     if (inField(e)) return;
-    if (k === 'z' && !e.shiftKey) { e.preventDefault(); if (!undo()) toast(t('没有可撤销的修改。')); }
-    else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); if (!redo()) toast(t('没有可重做的修改。')); }
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); if (!undo()) toast(t('没有可撤销的操作。')); }
+    else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); if (!redo()) toast(t('没有可重做的操作。')); }
   });
   body.addEventListener('scroll', kit.closePop);
   let growTimer = 0;
@@ -907,6 +1058,7 @@ function createApp(opts) {
   startProject();
   if (SERVER && opts.folder) connectFolderPath(opts.folder);
   renderAll();
+  placeWindow(S.view === 'hub');
 
   return {
     el: app,

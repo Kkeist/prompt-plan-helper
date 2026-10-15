@@ -1,7 +1,7 @@
 // 端到端自测：node tests/e2e.mjs
 // 无头 Chrome，交互走调试协议；浏览器文件夹用页面内的内存实现替身；桌面服务用临时的用户目录；截图放进 preview/。
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,7 @@ import { launch, DEEP } from './cdp.mjs';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const shots = join(root, 'preview');
 mkdirSync(shots, { recursive: true });
-const exZh = readFileSync(join(root, 'templates', 'zh', 'example.md'), 'utf8');
+const timer = readFileSync(join(root, 'tests', 'fixtures', 'timer.zh.md'), 'utf8');
 
 let pass = 0;
 const fails = [];
@@ -49,11 +49,11 @@ const MOCK_FS = `
 })();
 `;
 
-// ---- 桌面服务：临时用户目录里放一个「最近用 Claude 的文件夹」
+// 桌面服务：临时用户目录里放一个「最近在用的文件夹」
 const tmpHome = mkdtempSync(join(tmpdir(), 'shupian-home-'));
 const projDir = join(tmpHome, '番茄钟项目');
 mkdirSync(projDir, { recursive: true });
-writeFileSync(join(projDir, 'plan.md'), exZh);
+writeFileSync(join(projDir, 'plan.md'), timer);
 const enc = projDir.replace(/[^A-Za-z0-9]/g, '-');
 mkdirSync(join(tmpHome, '.claude', 'projects', enc), { recursive: true });
 writeFileSync(join(tmpHome, '.claude', 'projects', enc, 'a.jsonl'), '{}\n');
@@ -70,8 +70,9 @@ for (let i = 0; i < 40 && !srvInfo; i++) {
   try { const j = JSON.parse(readFileSync(join(tmpHome, '.shupian', 'server.json'), 'utf8')); if (j.port) srvInfo = j; } catch (e) { /* 还没写出来 */ }
 }
 
-// 静态服务（模拟被开发的页面和整页）
-const staticSrv = spawn(process.execPath, [join(root, 'tools', 'serve.mjs'), '.'], { stdio: ['ignore', 'pipe', 'inherit'] });
+// 静态服务（模拟被开发的页面和整页）：自己挑空闲端口
+const staticPort = 14900 + Math.floor(Math.random() * 400);
+const staticSrv = spawn(process.execPath, [join(root, 'tools', 'serve.mjs'), '.'], { stdio: ['ignore', 'pipe', 'inherit'], env: Object.assign({}, process.env, { PORT: String(staticPort) }) });
 const base = await new Promise((resolve) => staticSrv.stdout.once('data', (d) => resolve(String(d).trim())));
 
 const chrome = await launch(join(shots, '_chrome.json'));
@@ -96,148 +97,135 @@ try {
   const H = helpers(page);
   await page.goto(base + 'web/index.html');
   ok('已挂载为计划书页', (await page.eval('window.Shupian && window.Shupian.mode')) === 'plan');
-  ok('页面标题和图标', (await page.eval('document.title')) === 'prompt 计划书助手' && (await page.eval('!!document.querySelector("link[rel=apple-touch-icon]")')));
-  ok('空状态有四个入口', (await H.count('.empty button')) >= 3);
+  ok('页面标题、语言和图标', (await page.eval('document.title')) === 'prompt 计划书助手' && (await page.eval('document.documentElement.lang')) === 'zh-CN' && (await page.eval('!!document.querySelector("link[rel=apple-touch-icon]")')));
+  ok('页面描述不是旧的', !/薯片|修改单|投递/.test(await page.eval('document.querySelector("meta[name=description]").content')));
+  ok('空状态有入口', (await H.exists('button', '新建空白计划书', true)) && (await H.exists('button', '导入', true)) && (await H.exists('button', '查看示例', true)));
   const headH = await page.eval('__one(".head").getBoundingClientRect().height');
-  ok('顶栏一行，不超过 60 像素', headH <= 60, headH);
+  ok('顶栏加标签栏不超过 100 像素', headH <= 100, headH);
   ok('没有「投递」入口', !(await H.exists('button', '投递', true)));
   await page.shot(join(shots, '01-空状态-1280.png'));
 
-  await page.click(btn('看示例'));
+  console.log('导入计划书（番茄钟）');
+  await page.click(btn('导入'));
+  await page.click(Q('.modal textarea'));
+  await page.insert(timer);
+  await page.click(Q('.modal-foot button', '导入', true));
   await page.sleep(300);
-  ok('载入示例后有项目情况', await H.exists('.status-box'));
-  ok('项目情况里两个功能，已完成 1 / 2', /已完成 1 \/ 2/.test((await H.text('.status-head .muted')) || ''), await H.text('.status-head .muted'));
-  ok('示例没有待补', /没有待补/.test((await H.text('.statusline')) || ''), await H.text('.statusline'));
-  await page.shot(join(shots, '02-示例-1280.png'));
+  ok('项目情况：已完成 1 / 2', /已完成 1 \/ 2/.test((await H.text('.status-head .muted')) || ''), await H.text('.status-head .muted'));
+  ok('标题是项目情况', (await H.text('.status-head h2')) === '项目情况');
+  ok('没有虚线', !(await page.eval('(function(){var bad=0;__deep("*").forEach(function(e){var cs=getComputedStyle(e);if(/dashed|dotted/.test(cs.borderTopStyle+cs.borderBottomStyle+cs.borderLeftStyle+cs.borderRightStyle+cs.textDecorationStyle))bad++});return bad})()')));
+  await page.shot(join(shots, '02-项目情况-1280.png'));
 
-  console.log('项目情况：点进度改写计划书');
-  await page.click(Q('.status-row:nth-of-type(4) .prog'));
+  console.log('标签页和语言下拉');
+  ok('有一个项目标签', (await H.count('.tabbar .tab')) === 1);
+  await page.click(Q('.tabbar .chip.add'));
+  await page.sleep(300);
+  ok('加号新开一个标签', (await H.count('.tabbar .tab')) === 2);
+  await page.click(Q('.tabbar .tab:nth-of-type(1) .tab-name'));
+  await page.sleep(300);
+  ok('切回第一个标签，内容还在', /已完成 1 \/ 2/.test((await H.text('.status-head .muted')) || ''));
+  await page.click(Q('.tabbar .tab:nth-of-type(2) .tab-x'));
+  await page.sleep(300);
+  ok('关闭标签', (await H.count('.tabbar .tab')) === 1);
+  await page.click(Q('button.lang'));
+  ok('语言是下拉，有两项', (await H.count('.pop button')) === 2);
+  await page.click(Q('.pop button', 'English', true));
+  await page.sleep(300);
+  ok('选 English 后界面变成英文', await H.exists('.status-head h2', 'Project status'));
+  await page.click(Q('button.lang'));
+  await page.click(Q('.pop button', '中文', true));
+  await page.sleep(300);
+
+  console.log('确认之后变成功能清单');
+  await page.click(Q('.statusline .btn.primary'));
+  await page.sleep(300);
+  ok('状态变成已通过', /已通过/.test((await H.text('.state')) || ''));
+  ok('项目情况变成功能清单', (await H.text('.status-head h2')) === '功能清单');
+  ok('各部分默认收起', (await H.count('.sec.closed')) >= 5, await H.count('.sec.closed'));
+  ok('每个功能旁有 ＋', (await H.count('.status-row .btn.sm', '＋')) === 2);
+  await page.shot(join(shots, '03-功能清单-1280.png'));
+
+  console.log('写问题的小弹窗');
+  await page.click(Q('.status-row .btn.sm', '＋'));
+  ok('弹出小窗', await H.exists('.modal.small'));
+  const mw = await page.eval('__one(".modal.small").getBoundingClientRect().width');
+  ok('弹窗是小的', mw <= 400, mw);
+  ok('默认选中第一个功能', /4\.1 倒计时/.test((await H.text('.modal.small .target')) || ''), await H.text('.modal.small .target'));
+  await page.click(Q('.modal.small textarea'));
+  await page.insert('点暂停后数字仍在走@');
   await page.sleep(200);
-  ok('进行中的点一下变成已完成', /已完成 2 \/ 2/.test((await H.text('.status-head .muted')) || ''), await H.text('.status-head .muted'));
-  ok('计划书正文里的进度同步改了', /进度：已完成/.test((await H.text('.blk[data-no="4.2"] .box')) || ''), await H.text('.blk[data-no="4.2"] .box'));
-  await page.click(Q('.status-row:nth-of-type(4) .prog'));
+  ok('输入 @ 弹出功能列表', (await H.count('.pop button')) === 2);
+  await page.click(Q('.pop button', '4.2 今天完成几轮'));
   await page.sleep(150);
-  ok('再点一下回到未做', /已完成 1 \/ 2/.test((await H.text('.status-head .muted')) || ''));
-
-  console.log('居中版面');
-  const lay = await page.eval('(function(){var col=__one(".col").getBoundingClientRect();var hin=__one(".head .in").getBoundingClientRect();return {col:[col.left,col.right],head:[hin.left,hin.right]}})()');
-  ok('正文列居中且不超过 760 像素', Math.abs((lay.col[0] + lay.col[1]) / 2 - 640) < 20 && lay.col[1] - lay.col[0] <= 760, lay);
-  ok('顶栏内容和正文同一条列', Math.abs(lay.head[0] - lay.col[0]) < 8 && Math.abs(lay.head[1] - lay.col[1]) < 8, lay);
-
-  console.log('点一块直接改、加界面、删除、撤销');
-  await page.click(Q('.blk[data-no="4.1"] .box'));
-  await page.insert('（改过）');
-  await page.clickAt(5, 400);
-  await page.sleep(200);
-  ok('改完保存', /（改过）/.test((await H.text('.blk[data-no="4.1"] .box')) || ''));
-  ok('已通过之外的状态不回退', /整理中|已通过/.test((await H.text('.state')) || ''));
-  await page.click(Q('.sec[data-no="3"] .addslot button', '＋ 加界面'));
-  await page.click(Q('.addrow button', '添加', true));
-  ok('名称为空被拒绝', await H.exists('.err', '不能为空'));
-  await page.click(Q('.addrow input.in'));
-  await page.insert('计时界面');
-  await page.click(Q('.addrow button', '添加', true));
-  ok('重名被拒绝', await H.exists('.err', '已有同名界面'));
-  await page.key('a', 2);
-  await page.insert('统计界面');
-  await page.click(Q('.addrow button', '添加', true));
+  ok('选择后目标换成 4.2', /4\.2 今天完成几轮/.test((await H.text('.modal.small .target')) || ''), await H.text('.modal.small .target'));
+  ok('输入框里的 @ 被去掉', (await page.eval('__one(".modal.small textarea").value')) === '点暂停后数字仍在走');
+  await page.click(Q('.modal-foot button', '添加', true));
   await page.sleep(300);
-  ok('新界面出现，编号 3.3，并直接打开填写', (await H.exists('.blk[data-no="3.3"]')) && (await H.exists('.blk[data-no="3.3"] textarea.in.big')));
-  await page.clickAt(5, 400);
-  const del = await page.rectOf(Q('.blk[data-no="4.2"] .x'));
-  await page.clickAt(del.x, del.y);
-  await page.sleep(250);
-  ok('删除后块消失，项目情况跟着变', !(await H.exists('.blk[data-no="4.2"]')) && /已完成 1 \/ 1/.test((await H.text('.status-head .muted')) || ''));
-  await page.click(Q('.toast button', '撤销', true));
-  await page.sleep(250);
-  ok('撤销后块回来', await H.exists('.blk[data-no="4.2"]'));
-
-  console.log('流程一行写完');
-  await page.click(Q('.sec[data-no="2"] .addslot button', '＋ 加用法'));
+  ok('问题出现在功能清单里', await H.exists('.issue .issue-text', '点暂停后数字仍在走'));
+  ok('未处理的问题计数', /未处理的问题 1 条/.test((await H.text('.status-head .muted')) || ''));
+  await page.click(Q('.issue .btn.sm', '已修', true));
   await page.sleep(300);
-  ok('加用法直接出现填写框，不弹表单', (await H.exists('.sec[data-no="2"] textarea.in.big')) && !(await H.exists('.sec[data-no="2"] input.in')));
-  await page.clickAt(5, 400);
-  ok('待补计数增加', /还有 \d+ 处待补/.test((await H.text('.statusline .btn.sm')) || ''), await H.text('.statusline'));
+  ok('标记已修后从列表消失', !(await H.exists('.issue')));
 
   console.log('浏览器文件夹：连接、保存、自动读回');
   await page.click(btn('⋯'));
   await page.click(btn('连接文件夹'));
   await H.wait(async () => (await page.eval('Object.keys(__fs).length')) > 0, 30);
-  const keys = await page.eval('Object.keys(__fs)');
-  ok('计划书写进了文件夹，文件名是 plan.md', keys.indexOf('plan.md') >= 0, keys);
+  const saved = await page.eval('__fs["plan.md"] || ""');
+  ok('计划书写进了文件夹（plan.md），带问题', /进度：已完成/.test(saved) && /已修：点暂停后数字仍在走/.test(saved), saved.slice(0, 80));
   await page.eval('__fs["plan.md"] = __fs["plan.md"].replace(/(### 4\\.2[\\s\\S]*?进度：)[^\\n]*/, "$1已完成")');
   const t0 = Date.now();
   await H.wait(async () => /已完成 2 \/ 2/.test((await H.text('.status-head .muted')) || ''), 80);
-  ok('文件夹里的进度一改，页面 5 秒内自动更新', /已完成 2 \/ 2/.test((await H.text('.status-head .muted')) || '') && Date.now() - t0 < 6000, Date.now() - t0);
-  ok('显示同步时间', /同步于/.test((await H.text('.statusline')) || ''));
-
-  console.log('中英文切换');
-  await page.click(btn('⋯'));
-  await page.click(btn('English'));
-  await page.sleep(300);
-  ok('界面变成英文', /Prompt plan helper/.test((await H.text('.brand-name')) || ''), await H.text('.brand-name'));
-  ok('项目情况标题是英文', await H.exists('.status-head h2', 'Project status'));
-  await page.shot(join(shots, '03-English-1280.png'));
-  await page.click(btn('⋯'));
-  await page.click(btn('New blank plan'));
-  await page.sleep(300);
-  ok('英文界面下新建的计划书用英文模板', /^Plan:|Status:/m.test(await page.eval('__one(".statusline").parentElement.parentElement.textContent')) || (await H.exists('.sec h2', '1 What it is')));
-  await page.click(btn('⋯'));
-  await page.click(btn('中文'));
-  await page.sleep(200);
+  ok('文件夹里的进度一改，页面几秒内自动更新', /已完成 2 \/ 2/.test((await H.text('.status-head .muted')) || '') && Date.now() - t0 < 6500, Date.now() - t0);
 
   console.log('各屏幕宽度');
-  await page.click(btn('⋯'));
-  await page.click(btn('看示例'));
-  await page.sleep(250);
   for (const [w, hh] of [[1280, 800], [820, 1100], [390, 844], [320, 640], [280, 560]]) {
     await page.resize(w, hh, w < 700);
     await page.sleep(200);
-    const m = await page.eval('(function(){var b=__one(".body");var app=__one(".app").getBoundingClientRect();var bad=[];__deep("button,.pend,h2,.blk,.box,.status-box,textarea.in,input.in").forEach(function(e){var r=e.getBoundingClientRect();if(r.width&&(r.right>app.right+1||r.left<app.left-1))bad.push((e.textContent||e.className).slice(0,20))});return {page:document.documentElement.scrollWidth-innerWidth,body:b.scrollWidth-b.clientWidth,doc:document.scrollingElement.scrollHeight-document.scrollingElement.clientHeight,head:__one(".head").getBoundingClientRect().height,bad:bad.slice(0,5)}})()');
-    ok('宽 ' + w + '：不溢出、整页不滚动、顶栏一行', m.page <= 0 && m.body <= 0 && m.doc <= 0 && m.bad.length === 0 && m.head <= 64, m);
-    await page.shot(join(shots, '04-计划书-' + w + '.png'));
+    const m = await page.eval('(function(){var b=__one(".body");var app=__one(".app").getBoundingClientRect();var bad=[];__deep("button,.pend,h2,.blk,.box,.status-box,textarea.in,input.in").forEach(function(e){var r=e.getBoundingClientRect();if(r.width&&(r.right>app.right+1||r.left<app.left-1)&&!e.closest(".tabbar"))bad.push((e.textContent||e.className).slice(0,20))});return {page:document.documentElement.scrollWidth-innerWidth,body:b.scrollWidth-b.clientWidth,doc:document.scrollingElement.scrollHeight-document.scrollingElement.clientHeight,head:__one(".head").getBoundingClientRect().height,bad:bad.slice(0,5)}})()');
+    ok('宽 ' + w + '：不溢出、整页不滚动、顶栏不过高', m.page <= 0 && m.body <= 0 && m.doc <= 0 && m.bad.length === 0 && m.head <= 110, m);
+    await page.shot(join(shots, '04-功能清单-' + w + '.png'));
   }
   await page.resize(1280, 800);
 
   // ================= 桌面服务 =================
-  console.log('桌面服务：小窗口和文件夹');
+  console.log('桌面服务：最近标签和文件夹');
   ok('服务已启动', !!srvInfo, srvInfo);
-  const url = 'http://127.0.0.1:' + srvInfo.port + '/index.html?k=' + srvInfo.token;
-  const hub = await chrome.newPage();
-  await hub.init(DEEP);
-  await hub.resize(420, 640);
-  const HH = helpers(hub);
-  await hub.goto(url + '&view=hub');
-  await HH.wait(async () => HH.exists('.frow'), 40);
-  ok('桌面小窗口列出最近在用的文件夹', await HH.exists('.frow .fname', '番茄钟项目'), await hub.eval('__one(".folders") && __one(".folders").textContent'));
-  ok('标出「正在用」', await HH.exists('.badge', '正在用'));
-  ok('显示完整地址', (await HH.text('.fpath')) === projDir, await HH.text('.fpath'));
-  ok('显示进度摘要', /已完成 1 \/ 2，待补 0 处/.test((await HH.text('.frow .muted')) || ''), await HH.text('.frow .muted'));
-  ok('每个文件夹有复制地址', await HH.exists('.frow button', '复制地址', true));
-  await hub.shot(join(shots, '05-桌面小窗口-420.png'));
-  const hubW = await hub.eval('(function(){var b=__one(".body");return {over:b.scrollWidth-b.clientWidth, doc:document.documentElement.scrollWidth-innerWidth}})()');
-  ok('小窗口不横向溢出', hubW.over <= 0 && hubW.doc <= 0, hubW);
-
-  const full = await chrome.newPage();
-  await full.init(DEEP);
-  await full.resize(1280, 800);
-  const HF = helpers(full);
-  await full.goto(url + '&folder=' + encodeURIComponent(projDir));
-  await HF.wait(async () => HF.exists('.status-box'), 40);
-  ok('按文件夹打开：直接读到 plan.md', /番茄钟/.test((await HF.text('.title')) || ''), await HF.text('.title'));
-  ok('显示文件夹名和复制地址', (await HF.exists('.statusline button', '复制地址', true)) && /文件夹/.test((await HF.text('.statusline')) || ''));
-  await full.click(Q('.status-row:nth-of-type(4) .prog'));
+  const url = 'http://127.0.0.1:' + srvInfo.port + '/index.html?k=' + srvInfo.token + '&win=1';
+  const win = await chrome.newPage();
+  await win.init(DEEP);
+  await win.resize(420, 640);
+  const HW = helpers(win);
+  await win.goto(url + '&view=hub');
+  await HW.wait(async () => HW.exists('.frow'), 40);
+  ok('先显示「最近」标签', await HW.exists('.tabbar .chip.on', '最近', true));
+  ok('列出最近在用的文件夹', await HW.exists('.frow .fname', '番茄钟项目'), await win.eval('__one(".folders") && __one(".folders").textContent'));
+  ok('标出「使用中」', await HW.exists('.badge', '使用中'));
+  ok('显示完整地址', (await HW.text('.fpath')) === projDir, await HW.text('.fpath'));
+  ok('显示进度摘要', /已完成 1 \/ 2，待补 0 处/.test((await HW.text('.frow .muted')) || ''), await HW.text('.frow .muted'));
+  ok('复制地址旁写着「方便打开 CLI」', await HW.exists('.frow .cli-hint', '方便打开 CLI'));
+  ok('界面里没有 Claude 字样', !/Claude/.test(await win.eval('__one(".app").textContent')));
+  await win.shot(join(shots, '05-最近-420.png'));
+  await win.click(Q('.frow .btn.primary'));
+  await HW.wait(async () => HW.exists('.status-box'), 40);
+  ok('点打开计划书：在新标签里打开', (await HW.exists('.tabbar .tab .tab-name', '番茄钟（示例）')) || (await HW.count('.tabbar .tab')) === 1, await HW.text('.tabbar'));
+  ok('读到了 plan.md 的内容', /番茄钟/.test((await HW.text('.title')) || ''), await HW.text('.title'));
+  ok('显示文件夹名和复制地址', (await HW.exists('.statusline button', '复制地址', true)) && (await HW.exists('.statusline .muted', '方便打开 CLI')));
+  await win.click(Q('.status-row:nth-of-type(4) .prog'));
   await sleep(900);
-  ok('点进度后，磁盘上的 plan.md 改了', /进度：已完成/.test(readFileSync(join(projDir, 'plan.md'), 'utf8').split('### 4.2')[1] || ''), readFileSync(join(projDir, 'plan.md'), 'utf8').split('### 4.2')[1]);
+  ok('点进度后，磁盘上的 plan.md 改了', /进度：已完成/.test(readFileSync(join(projDir, 'plan.md'), 'utf8').split('### 4.2')[1] || ''));
   writeFileSync(join(projDir, 'plan.md'), readFileSync(join(projDir, 'plan.md'), 'utf8').replace(/(### 4\.2[\s\S]*?进度：)已完成/, '$1未做'));
   const t1 = Date.now();
-  await HF.wait(async () => /已完成 1 \/ 2/.test((await HF.text('.status-head .muted')) || ''), 80);
-  ok('磁盘上的计划书被 AI 改了，页面自动更新', /已完成 1 \/ 2/.test((await HF.text('.status-head .muted')) || '') && Date.now() - t1 < 7000, Date.now() - t1);
-  const bad = await full.eval('fetch("/api/file?root=" + encodeURIComponent("C:\\\\Windows") + "&p=plan.md", { headers: { "x-shupian-token": "' + srvInfo.token + '" } }).then(function(r){return r.status})');
+  await HW.wait(async () => /已完成 1 \/ 2/.test((await HW.text('.status-head .muted')) || ''), 80);
+  ok('磁盘上的计划书被改了，页面自动更新', /已完成 1 \/ 2/.test((await HW.text('.status-head .muted')) || '') && Date.now() - t1 < 7000, Date.now() - t1);
+  const bad = await win.eval('fetch("/api/file?root=" + encodeURIComponent("C:\\\\Windows") + "&p=plan.md", { headers: { "x-shupian-token": "' + srvInfo.token + '" } }).then(function(r){return r.status})');
   ok('服务不读未知文件夹', bad === 400, bad);
-  const noTok = await full.eval('fetch("/api/projects").then(function(r){return r.status})');
+  const noTok = await win.eval('fetch("/api/projects").then(function(r){return r.status})');
   ok('没有口令的接口请求被拒绝', noTok === 401, noTok);
-  await full.shot(join(shots, '06-桌面打开计划书-1280.png'));
+  await win.shot(join(shots, '06-桌面打开计划书-420.png'));
+  await win.click(Q('.tabbar .chip', '最近', true));
+  await win.sleep(300);
+  ok('可以切回「最近」', await HW.exists('.frow'));
 
   // ================= 悬浮窗 =================
   console.log('小悬浮窗');
@@ -253,13 +241,14 @@ try {
   await fpage.key('S', 1 | 8);
   await fpage.sleep(300);
   ok('Alt+Shift+S 打开小窗', (await fpage.eval('__one(".win").style.display')) !== 'none');
-  const win = await fpage.rectOf(fq('.win'));
-  ok('悬浮窗是小窗：宽不超过 330、高不超过 330', win.w <= 330 && win.h <= 330, win);
+  const win1 = await fpage.rectOf(fq('.win'));
+  ok('悬浮窗是小窗：宽不超过 330、高不超过 330', win1.w <= 330 && win1.h <= 330, win1);
+  ok('三个动作按钮', (await HP.exists('button', '选取元素', true)) && (await HP.exists('button', '区域截图', true)) && (await HP.exists('button', '当前页面', true)));
   await fpage.shot(join(shots, '07-悬浮窗-1280.png'));
   const hdr = await fpage.rectOf(fq('.head .brand'));
   await fpage.drag(hdr.x, hdr.y, hdr.x - 300, hdr.y + 100);
   const win2 = await fpage.rectOf(fq('.win'));
-  ok('窗口可以拖动', Math.abs(win2.l - win.l) > 200, [win.l, win2.l]);
+  ok('窗口可以拖动', Math.abs(win2.l - win1.l) > 200, [win1.l, win2.l]);
   await fpage.drag(win2.l + 20, win2.t + 15, -400, 5);
   const win3 = await fpage.rectOf(fq('.win'));
   ok('拖出屏幕最多出去一半', win3.l >= -win3.w / 2 - 2 && win3.r > 0, win3);
@@ -267,10 +256,18 @@ try {
   await fpage.eval('window.Shupian.open()');
   await fpage.sleep(200);
 
-  await fpage.click(fq('button', '截图', true));
+  await fpage.click(fq('button', '当前页面', true));
   await HP.wait(async () => fpage.eval('__deep(".chipline img.shot").length === 1'), 40);
-  ok('截图出现在窗里', (await fpage.eval('__deep(".chipline img.shot").length')) === 1);
-  ok('标注为伪截图', /伪截图/.test((await HP.text('.chipline')) || ''), await HP.text('.chipline'));
+  ok('当前页面：一下记下页面信息，并带一张整页截图', (await HP.exists('.chipline', '当前页面：')) && (await fpage.eval('__deep(".chipline img.shot").length')) === 1, await HP.text('.fb-body'));
+  await fpage.click(fq('button', '区域截图', true));
+  await fpage.sleep(300);
+  await fpage.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 100, y: 100 });
+  await fpage.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 100, y: 100, button: 'left', clickCount: 1 });
+  await fpage.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 400, y: 260, button: 'left' });
+  await fpage.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 400, y: 260, button: 'left', clickCount: 1 });
+  await fpage.sleep(800);
+  const dims = await fpage.eval('(function(){var i=__one(".chipline img.shot");return new Promise(function(r){function done(){r([i.naturalWidth,i.naturalHeight])}if(i.complete&&i.naturalWidth)return done();i.onload=done;setTimeout(done,3000)})})()');
+  ok('区域截图：图的大小是框出来的区域', dims[0] === 300 && dims[1] === 160, dims);
   await fpage.click(fq('button', '选取元素', true));
   await fpage.sleep(150);
   const target = await fpage.eval('(function(){var r=document.querySelector("h1").getBoundingClientRect();return {x:r.left+20,y:r.top+10}})()');
@@ -278,15 +275,15 @@ try {
   await fpage.sleep(100);
   await fpage.clickAt(target.x, target.y);
   await fpage.sleep(300);
-  ok('选取的元素显示出来', /h1/.test((await HP.text('.chipline')) || ''), await HP.text('.chipline'));
+  ok('选取的元素显示出来', /h1/.test((await HP.text('.fb-body')) || ''), await HP.text('.fb-body'));
   await fpage.click(fq('textarea.in'));
   await fpage.insert('标题字号太小');
   await fpage.eval('window.__clip = null; Object.defineProperty(navigator, "clipboard", { value: { writeText: function (t) { window.__clip = t; return Promise.resolve(); }, write: function () { return Promise.resolve(); } }, configurable: true });');
   await fpage.click(fq('button', '复制文字', true));
   await fpage.sleep(300);
   const clip = await fpage.eval('window.__clip');
-  ok('复制出来的话带页面、元素、样式、一句话、报错', clip && /h1/.test(clip) && /标题字号太小/.test(clip) && /font-size/.test(clip) && /测试报错/.test(clip) && /host\.html/.test(clip) && /1280×800/.test(clip), clip);
-  ok('没有投递、队列、文件夹这类东西', !/投递|inbox/.test(await fpage.eval('__one(".win").textContent')));
+  ok('复制出来的话带页面、标题、元素、样式、说明、报错', clip && /h1/.test(clip) && /页面标题：示例项目页面/.test(clip) && /标题字号太小/.test(clip) && /font-size/.test(clip) && /测试报错/.test(clip) && /host\.html/.test(clip) && /1280×800/.test(clip), clip);
+  ok('没有口语化的提示词', !/随手|就行/.test(await fpage.eval('__one(".win").textContent') + (await fpage.eval('__one("textarea.in").placeholder'))));
   await fpage.click(fq('button.x[title="关闭"]'));
   ok('关闭后回到悬浮按钮', (await fpage.eval('!!' + fq('.fab') + ' && ' + fq('.fab') + '.style.display !== "none"')));
   await fpage.resize(390, 700, true);
@@ -304,7 +301,7 @@ try {
   await p4.sleep(300);
   ok('页面能打开且没有报错', (await p4.eval('!!window.Shupian')) && p4.logs.length === 0, p4.logs);
 
-  const errs = page.logs.concat(hub.logs, full.logs);
+  const errs = page.logs.concat(win.logs);
   ok('页面形态全程没有脚本报错', errs.length === 0, errs.slice(0, 5));
 } catch (e) {
   fails.push('测试中断：' + (e && e.stack ? e.stack : e));

@@ -3,8 +3,8 @@
 // 文档按行保存，编辑只改行，导出就是把行接回去，所以导出再导入内容不变。
 
 // 第几部分是什么（和模板里的编号一致）
-const SEC = { what: '1', flows: '2', pages: '3', features: '4', data: '5', other: '6' };
-const LAST_FILLED = 6;
+const SEC = { what: '1', flows: '2', pages: '3', features: '4', data: '5', look: '6', rules: '7' };
+const LAST_FILLED = 7;
 
 const TBD_RE = /(?:待补|TBD)[：:]/g;
 const TBD_QUOTED_RE = /[「"“](?:待补|TBD)[^」"”]*[」"”]/g;
@@ -16,7 +16,7 @@ const WORDS = {
     title: '计划书', status: '状态', updated: '更新', tbd: '待补', missing: '缺',
     states: { draft: '草稿', doing: '整理中', approved: '已通过' },
     progress: { label: '进度', todo: '未做', doing: '进行中', done: '已完成' },
-    page: { fields: ['这个界面是干什么的：', '界面上有什么：', '怎么来到这个界面：'] },
+    page: { fields: ['这个页面是干什么的：', '页面上有什么：', '怎么来到这个页面：'] },
     feature: { fields: ['它做什么：', '怎么才算做好：', '有什么限制：'], progressLabel: '进度：' },
     newFlow: '〈名字〉：待补：用户做什么 → 看到什么',
   },
@@ -24,16 +24,17 @@ const WORDS = {
     title: 'Plan', status: 'Status', updated: 'Updated', tbd: 'TBD', missing: 'missing ',
     states: { draft: 'Draft', doing: 'In progress', approved: 'Approved' },
     progress: { label: 'Progress', todo: 'Not started', doing: 'In progress', done: 'Done' },
-    page: { fields: ['What this screen is for:', 'What is on the screen:', 'How the user gets here:'] },
+    page: { fields: ['What this page is for:', 'What is on the page:', 'How the user gets here:'] },
     feature: { fields: ['What it does:', 'Done when:', 'Limits:'], progressLabel: 'Progress:' },
     newFlow: '〈Name〉: TBD: what the user does → what they see',
   },
 };
 
-const PARTS_RE = /^(?:界面上有什么|What is on the screen|页面里有什么|What is on the page|部件|Parts?)$/i;
+const PARTS_RE = /^(?:页面上有什么|What is on the page|界面上有什么|What is on the screen|页面里有什么|部件|Parts?)$/i;
 const CASES_RE = /^(?:怎么才算做好|Done when|用例|Use cases?)$/i;
 const WHAT_RE = /^(?:它做什么|做什么|What it does|一句话)$/i;
 const PROGRESS_LABEL_RE = /^(?:进度|Progress)$/i;
+const ISSUES_RE = /^(?:问题|Issues)$/i;
 const STATE_WORDS = [
   [/^(?:草稿|draft)$/i, 'draft'],
   [/^(?:整理中|in progress)$/i, 'doing'],
@@ -191,6 +192,7 @@ function isEmptyField(lines, i) {
   if (t.kind !== 'p' && t.kind !== 'li') return false;
   const lv = splitLabel(t.body);
   if (!lv || lv.value.trim() !== '') return false;
+  if (ISSUES_RE.test(lv.label)) return false;
   if (t.kind === 'li') return rangeEnd(lines, i) === i + 1;
   const nx = nextNonBlank(lines, i);
   return !(nx >= 0 && info(lines[nx]).kind === 'li');
@@ -391,7 +393,7 @@ function positions(md) {
   const lines = split(md);
   const s = structure(md);
   const zh = docLang(md) === 'zh';
-  const names = zh ? { page: '界面', widget: '东西', feature: '功能', case: '情况' } : { page: 'Screen', widget: 'Thing', feature: 'Feature', case: 'Case' };
+  const names = zh ? { page: '页面', widget: '东西', feature: '功能', case: '情况' } : { page: 'Page', widget: 'Thing', feature: 'Feature', case: 'Case' };
   const out = [];
   s.pages.forEach((p) => out.push({ kind: 'page', label: names.page + ' ' + (p.no + ' ' + p.name).trim() }));
   s.widgets.forEach((w) => out.push({ kind: 'widget', label: names.widget + ' ' + blockName(lines, w.block) + ' › ' + w.name }));
@@ -452,6 +454,72 @@ function setProgress(md, featureLine, code) {
 
 function nextProgress(code) {
   return code === 'todo' ? 'doing' : code === 'doing' ? 'done' : 'todo';
+}
+
+// ---------- 问题（功能清单里，每个功能下面做的过程中发现的问题）----------
+
+const FIXED_RE = /^(?:已修|Fixed)[：:]\s*/;
+
+// 每个功能的问题：[{ featureLine, items: [{ line, text, done }] }]
+function issueList(md) {
+  const lines = split(md);
+  return structure(md).features.map((f) => {
+    const end = bodyRange(lines, f.line).end;
+    const items = [];
+    for (let j = f.line + 1; j < end; j++) {
+      const t = info(lines[j]);
+      if (t.kind !== 'p' && t.kind !== 'li') continue;
+      const lv = splitLabel(t.body);
+      if (!lv || !ISSUES_RE.test(lv.label)) continue;
+      itemsUnder(lines, j).forEach((k) => {
+        const body = info(lines[k]).body;
+        items.push({ line: k, text: body.replace(FIXED_RE, ''), done: FIXED_RE.test(body) });
+      });
+    }
+    return { featureLine: f.line, no: f.no, name: f.name, items };
+  });
+}
+
+// 在功能块里的「问题：」下面加一条；没有「问题：」就加在「进度：」前面
+function addIssue(md, featureLine, text, date) {
+  const lines = split(md);
+  const lang = docLang(md);
+  const label = lang === 'zh' ? '问题：' : 'Issues:';
+  const end = bodyRange(lines, featureLine).end;
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return { ok: false, code: 'empty' };
+  const bullet = '- ' + clean + '（' + (date || today()) + '）';
+  let at = -1;
+  let progressAt = -1;
+  for (let j = featureLine + 1; j < end; j++) {
+    const t = info(lines[j]);
+    if (t.kind !== 'p' && t.kind !== 'li') continue;
+    const lv = splitLabel(t.body);
+    if (!lv) continue;
+    if (ISSUES_RE.test(lv.label)) {
+      const kids = itemsUnder(lines, j);
+      at = (kids.length ? kids[kids.length - 1] : j) + 1;
+      break;
+    }
+    if (PROGRESS_LABEL_RE.test(lv.label)) progressAt = j;
+  }
+  if (at >= 0) {
+    lines.splice(at, 0, bullet);
+  } else {
+    const insertAt = progressAt >= 0 ? progressAt : end;
+    lines.splice(insertAt, 0, label, bullet);
+  }
+  return { ok: true, md: join(lines) };
+}
+
+function setIssueDone(md, line, done) {
+  const lines = split(md);
+  const t = info(lines[line]);
+  if (t.kind !== 'li') return md;
+  const lang = docLang(md);
+  const body = t.body.replace(FIXED_RE, '');
+  lines[line] = ' '.repeat(t.indent) + t.marker + ' ' + (done ? (lang === 'zh' ? '已修：' : 'Fixed: ') : '') + body;
+  return join(lines);
 }
 
 // ---------- 新增块 ----------
@@ -629,6 +697,7 @@ function buildFeedback(d, lang) {
   if (d.page || d.view) out.push((zh ? '页面：' : 'Page: ') + [d.page, d.view].filter(Boolean).join('  '));
   if (d.element) out.push((zh ? '我指的东西：' : 'The thing I mean: ') + d.element);
   if (d.styles) out.push((zh ? '它现在的样式：' : 'Its styles now: ') + d.styles);
+  (d.summary || []).forEach((l) => out.push(l));
   if (d.shot) out.push((zh ? '截图：' : 'Screenshot: ') + d.shot);
   out.push('', String(d.text || '').trim() || (zh ? '（在这里写想怎么改）' : '(write what to change here)'));
   if (d.errors && d.errors.length) {
@@ -644,7 +713,7 @@ module.exports = {
   rangeEnd, bodyRange, bodyText, setBody, deleteSubtree, sectionNo, headings,
   pendingList, countPending, getStatus, statusLabel, setStatus, markPassed,
   titleName, setTitle, structure, positions, nextNumber, checkName,
-  progressList, setProgress, nextProgress,
+  progressList, setProgress, nextProgress, issueList, addIssue, setIssueDone,
   addBlock, renameBlock, addFlowLine, blankPlan, normalizeForExport,
   buildAiPrompt, buildFeedback,
 };

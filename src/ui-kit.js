@@ -45,7 +45,7 @@ function createKit(appEl) {
       if (o.onClose) o.onClose();
     };
     m.close = close;
-    const box = h('div', { class: 'modal', role: 'dialog' },
+    const box = h('div', { class: 'modal' + (o.small ? ' small' : ''), role: 'dialog' },
       h('div', { class: 'modal-head' }, h('h2', { text: o.title }), h('button', { type: 'button', class: 'x', title: t('关闭'), onclick: close }, '✕')),
       h('div', { class: 'modal-body' }, o.body),
       o.foot ? h('div', { class: 'modal-foot' }, o.foot(close)) : null);
@@ -99,7 +99,7 @@ function copyThen(kit, text, ta) {
     if (ok) kit.toast(t('已复制。'));
     else {
       if (ta) ta.select();
-      kit.toast(t('浏览器不允许自动复制，已选中全文，请按 Ctrl+C 复制。'));
+      kit.toast(t('浏览器不允许自动复制，全文已选中，请按 Ctrl+C 复制。'));
     }
   });
 }

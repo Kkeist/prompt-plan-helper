@@ -8,7 +8,7 @@
   --line: #d4d4d4;
   --soft: #f6f6f6;
   --hover: #ececec;
-  --z-pop: 30;
+  --z-pop: 60;
   --z-modal: 40;
   --z-toast: 50;
   font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
@@ -111,7 +111,7 @@
 
 .doc h1 { margin: 0.2em 0 0.2em; font-size: 1.6em; line-height: 1.3; }
 .title { display: block; max-width: 100%; text-align: left; border: 0; background: transparent; padding: 0; font: inherit; font-weight: 700; cursor: text; overflow-wrap: anywhere; }
-.title:hover { text-decoration: underline dotted; }
+.title:hover { text-decoration: underline; }
 .doc h1 .in { font-size: 1em; font-weight: 700; }
 .statusline { margin-top: 0.4em; }
 .state { font-weight: 700; border: 1px solid var(--ink); border-radius: 0.3em; padding: 0 0.5em; }
@@ -144,7 +144,7 @@
 
 .pend { background: var(--ink); color: var(--paper); border-radius: 0.25em; padding: 0 0.3em; }
 .pend.flash { outline: 3px solid var(--ink); outline-offset: 2px; }
-.ph { border: 1px dashed var(--ink); border-radius: 0.25em; padding: 0 0.25em; }
+.ph { background: var(--hover); border-radius: 0.25em; padding: 0 0.25em; }
 .ref { border: 0; background: transparent; padding: 0; text-decoration: underline; cursor: pointer; font: inherit; }
 
 /* 填写 */
@@ -229,7 +229,7 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .status-head h2 { margin: 0 0.8em 0 0; font-size: 1.05em; }
 .bar-track { display: flex; height: 0.5em; margin: 0.4em 0 0.3em; border: 1px solid var(--ink); border-radius: 1em; overflow: hidden; background: var(--paper); }
 .bar-done { background: var(--ink); }
-.bar-doing { background: repeating-linear-gradient(45deg, var(--ink) 0, var(--ink) 3px, var(--paper) 3px, var(--paper) 6px); }
+.bar-doing { background: #8a8a8a; }
 .status-row { display: flex; align-items: center; padding: 0.25em 0; border-top: 1px solid var(--line); }
 .bar-track + .status-row { border-top: 0; }
 .status-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -249,3 +249,32 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .fpath { color: var(--muted); font-size: 0.85em; overflow-wrap: anywhere; }
 .factions { flex: none; display: flex; flex-direction: column; margin-left: 0.6em; }
 .factions .btn { margin-bottom: 0.3em; }
+
+/* 标签 */
+.head .tabs-in { padding-top: 0; padding-bottom: 0.4em; }
+.tabbar { display: flex; align-items: center; flex: 1; min-width: 0; overflow-x: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.tabbar::-webkit-scrollbar { display: none; }
+.tabbar > * { flex: none; margin-right: 0.35em; }
+.tab { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 0.5em; background: var(--paper); }
+.tab.on { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+.tab-name { border: 0; background: transparent; padding: 0.1em 0.2em 0.1em 0.7em; cursor: pointer; text-align: left; }
+.tab-x { border: 0; background: transparent; padding: 0.1em 0.55em 0.1em 0.3em; cursor: pointer; opacity: 0.7; }
+.tab-x:hover { opacity: 1; }
+.chip.add { padding: 0.1em 0.7em; }
+.lang { flex: none; border: 1px solid var(--line); background: var(--paper); border-radius: 0.45em; padding: 0.1em 0.6em; cursor: pointer; }
+.lang:hover { background: var(--hover); }
+.menu-link { display: block; padding: 0.4em 0.75em; color: var(--ink); text-decoration: none; border-radius: 0.4em; }
+.menu-link:hover { background: var(--hover); }
+.cli-hint { font-size: 0.8em; text-align: center; }
+
+/* 功能清单：问题和小弹窗 */
+.modal.small { max-width: 24em; }
+.status-head .btn { margin-left: auto; }
+.issue { display: flex; align-items: flex-start; margin: 0.2em 0 0.2em 1.2em; padding: 0.25em 0.5em; background: var(--soft); border-radius: 0.5em; }
+.issue-text { flex: 1; min-width: 0; margin: 0 0.5em; overflow-wrap: anywhere; }
+.status-row .btn.sm { flex: none; margin-left: 0.5em; }
+.target { max-width: 100%; text-align: left; overflow-wrap: anywhere; }
+
+/* 小悬浮窗里的按钮更紧凑，三个动作放在一行 */
+.fb .btn { padding: 0.15em 0.5em; font-size: 0.92em; }
+.fb .row > * { margin-right: 0.35em; }

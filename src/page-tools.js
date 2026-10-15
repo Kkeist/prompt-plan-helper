@@ -164,7 +164,7 @@ function pickElement(shadowRoot) {
     box.setAttribute('style', 'position:fixed;z-index:2147483646;pointer-events:none;border:2px solid #e5322d;background:rgba(229,50,45,0.12);display:none');
     const tip = document.createElement('div');
     tip.setAttribute('style', 'position:fixed;z-index:2147483646;pointer-events:none;left:8px;top:8px;background:#000;color:#fff;font:13px/1.5 sans-serif;padding:4px 8px;border-radius:6px;max-width:calc(100vw - 16px);overflow-wrap:anywhere');
-    tip.textContent = '点一下选取元素，Esc 取消。';
+    tip.textContent = t('点击要选取的元素，按 Esc 取消。');
     shadowRoot.append(box, tip);
     let cur = null;
     const done = (v) => {
@@ -199,4 +199,100 @@ function pickElement(shadowRoot) {
     document.addEventListener('click', click, true);
     document.addEventListener('keydown', key, true);
   });
+}
+
+// 当前页面的信息：标题、地址、窗口、滚动位置、能看到的标题和可点的东西
+function pageInfo() {
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight && cs.visibility !== 'hidden' && cs.display !== 'none';
+  };
+  const texts = (sel, max) => {
+    const out = [];
+    Array.prototype.forEach.call(document.querySelectorAll(sel), (el) => {
+      if (out.length >= max || el.closest('[data-shupian]') || !visible(el)) return;
+      const s = (el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '').replace(/\s+/g, ' ').trim();
+      if (s && out.indexOf(s) < 0) out.push(s.slice(0, 40));
+    });
+    return out;
+  };
+  return {
+    title: document.title,
+    scroll: Math.round(window.scrollX) + ',' + Math.round(window.scrollY),
+    pixelRatio: window.devicePixelRatio,
+    headings: texts('h1,h2,h3', 8),
+    controls: texts('button,a[href],input,select,textarea,[role="button"]', 15),
+  };
+}
+
+// 在页面上拖出一块区域，返回它在窗口里的位置；Esc 取消
+function pickRegion(shadowRoot) {
+  return new Promise((resolve) => {
+    const layer = document.createElement('div');
+    layer.setAttribute('style', 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483646;cursor:crosshair;background:rgba(0,0,0,0.25)');
+    const box = document.createElement('div');
+    box.setAttribute('style', 'position:fixed;border:2px solid #e5322d;background:rgba(255,255,255,0.15);display:none;pointer-events:none');
+    const tip = document.createElement('div');
+    tip.setAttribute('style', 'position:fixed;left:8px;top:8px;background:#000;color:#fff;font:13px/1.5 sans-serif;padding:4px 8px;border-radius:6px;pointer-events:none');
+    tip.textContent = t('拖动选择截图区域，按 Esc 取消。');
+    shadowRoot.append(layer, box, tip);
+    let sx = 0;
+    let sy = 0;
+    let dragging = false;
+    const done = (v) => {
+      document.removeEventListener('keydown', key, true);
+      layer.remove();
+      box.remove();
+      tip.remove();
+      resolve(v);
+    };
+    const rectOf = (x, y) => ({ x: Math.min(sx, x), y: Math.min(sy, y), w: Math.abs(x - sx), h: Math.abs(y - sy) });
+    layer.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      sx = e.clientX;
+      sy = e.clientY;
+      box.style.display = 'block';
+      layer.setPointerCapture(e.pointerId);
+    });
+    layer.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const r = rectOf(e.clientX, e.clientY);
+      box.style.left = r.x + 'px';
+      box.style.top = r.y + 'px';
+      box.style.width = r.w + 'px';
+      box.style.height = r.h + 'px';
+    });
+    layer.addEventListener('pointerup', (e) => {
+      if (!dragging) return;
+      dragging = false;
+      const r = rectOf(e.clientX, e.clientY);
+      done(r.w >= 8 && r.h >= 8 ? r : null);
+    });
+    const key = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); }
+    };
+    document.addEventListener('keydown', key, true);
+  });
+}
+
+// 把整个可见区域的图按区域裁开
+async function cropShot(shot, rect) {
+  const url = URL.createObjectURL(shot.blob);
+  const img = new Image();
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = () => reject(new Error('decode'));
+    img.src = url;
+  });
+  const kx = img.naturalWidth / window.innerWidth;
+  const ky = img.naturalHeight / window.innerHeight;
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(rect.w * kx));
+  c.height = Math.max(1, Math.round(rect.h * ky));
+  c.getContext('2d').drawImage(img, rect.x * kx, rect.y * ky, rect.w * kx, rect.h * ky, 0, 0, c.width, c.height);
+  URL.revokeObjectURL(url);
+  const blob = await new Promise((resolve) => c.toBlob(resolve, 'image/webp', 0.85));
+  if (!blob) throw new Error('encode');
+  return { blob, kind: shot.kind };
 }

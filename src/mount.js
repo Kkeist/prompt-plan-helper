@@ -58,12 +58,12 @@ function mountPage(host) {
   const root = host.attachShadow({ mode: 'open' });
   root.append(styleEl());
   const wrap = h('div', { style: 'width:100%;height:100%' });
-  const hub = params.get('view') === 'hub' && SERVER;
-  const inst = hub ? createHub({ root }) : createApp({ root, defaultName: t('新项目'), folder: params.get('folder') || '' });
+  const inst = createApp({ root, defaultName: t('新项目'), folder: params.get('folder') || '' });
   wrap.append(inst.el);
   root.append(wrap);
   document.title = t('prompt 计划书助手');
-  return { open() {}, close() {}, toggle() {}, mode: hub ? 'hub' : 'plan' };
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+  return { open() {}, close() {}, toggle() {}, mode: 'plan' };
 }
 
 function nextFrames(n) {
@@ -133,8 +133,16 @@ function mountFloat(autoOpen) {
       if (!isOpen) fab.style.display = '';
     }
   };
+  const viewShot = async () => (await realShot()) || (await domShot());
   const tools = {
-    capture: () => whileHidden(async () => (await realShot()) || (await domShot())),
+    // 当前页面：一下记下页面的信息，并存一张整个可见区域的图
+    page: () => whileHidden(async () => ({ info: pageInfo(), shot: await viewShot() })),
+    // 区域截图：拖出一块区域，只存这一块
+    region: async () => {
+      const rect = await whileHidden(() => pickRegion(root));
+      if (!rect) return null;
+      return whileHidden(async () => cropShot(await viewShot(), rect));
+    },
     pick: () => whileHidden(() => pickElement(root)),
     errors: () => pageErrors.slice(),
     context: () => ({ page: location.href, view: window.innerWidth + '×' + window.innerHeight }),
