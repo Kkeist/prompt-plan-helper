@@ -74,6 +74,7 @@ async function openExtensionHelp(kit) {
       h('ol', { class: 'steps' }, steps),
       h('div', { class: 'muted', text: t('extension_folder') }),
       h('button', { type: 'button', class: 'fpath', title: t('copy_path'), 'aria-label': t('copy_path') + '：' + info.path, onclick: () => copyThen(kit, info.path) }, info.path),
+      info.browsers.some((b) => b.id === 'firefox') ? h('p', { class: 'hint', text: t('extension_step_firefox') }) : null,
       info.browsers.length ? null : h('p', { class: 'hint', text: t('no_edge_or_chrome_was_found') })),
     foot: (close) => [h('button', { type: 'button', class: 'btn', onclick: close }, t('close'))].concat(
       info.browsers.map((b, i) => h('button', { type: 'button', class: 'btn' + (i === 0 ? ' primary' : ''), onclick: () => openPage(b) }, t('open_the_extensions_page_in_name', { name: b.name })))),
@@ -83,10 +84,13 @@ async function openExtensionHelp(kit) {
 // 「最近」页顶上的一行：悬浮窗要不要装扩展。检测完成前占位不显示，避免下面的内容移位。
 function extensionRow(kit) {
   const row = h('div', { class: 'extrow wait' });
-  setTimeout(() => {
+  setTimeout(async () => {
+    // 扩展在别的浏览器里时，页面里没有标记，但扩展已经联系过本服务
+    let seen = false;
+    try { seen = !!(await Api.call('GET', '/api/extension')).seen; } catch (e) { kit.toast(t('could_not_prepare_the_extension_why', { why: errText(e) })); }
     row.classList.remove('wait');
     clear(row);
-    if (extensionInstalled()) {
+    if (extensionInstalled() || seen) {
       row.append(h('span', { class: 'muted', text: t('the_page_floating_window_is_on_alt_shift_s') }));
       return;
     }

@@ -193,6 +193,7 @@ export function syncExtension() {
 const BROWSERS = [
   { id: 'edge', name: 'Edge', page: 'edge://extensions/', exe: ['Microsoft/Edge/Application/msedge.exe'] },
   { id: 'chrome', name: 'Chrome', page: 'chrome://extensions/', exe: ['Google/Chrome/Application/chrome.exe'] },
+  { id: 'firefox', name: 'Firefox', page: 'about:debugging#/runtime/this-firefox', exe: ['Mozilla Firefox/firefox.exe'] },
 ].map((b) => Object.assign(b, {
   path: ['ProgramFiles(x86)', 'ProgramFiles'].map((v) => process.env[v]).filter(Boolean)
     .flatMap((base) => b.exe.map((e) => join(base, e))).filter((e) => existsSync(e))[0] || '',
@@ -220,6 +221,8 @@ function pickFolder(description) {
 export function startServer() {
   const token = randomBytes(12).toString('hex');
   let lastUse = Date.now();
+  // 浏览器扩展联系过本服务
+  let extensionSeen = false;
   let port = 0;
 
   const server = createServer(async (req, res) => {
@@ -232,6 +235,13 @@ export function startServer() {
     try {
       const url = new URL(req.url, 'http://127.0.0.1');
       if (req.headers.host !== '127.0.0.1:' + port) { json(403, { error: 'host' }); return; }
+      if (url.pathname === '/api/pair' && req.method === 'POST') {
+        // 只有扩展发来的请求（来源是扩展自己的地址）能拿到口令，网页拿不到
+        if (!/^(chrome|moz)-extension:\/\//.test(String(req.headers.origin || ''))) { json(403, { error: 'origin' }); return; }
+        extensionSeen = true;
+        json(200, { token });
+        return;
+      }
       if (url.pathname.indexOf('/api/') === 0) {
         if (req.headers['x-shupian-token'] !== token) { json(401, { error: 'token' }); return; }
         if (url.pathname === '/api/ping') { json(200, { ok: true }); return; }
@@ -266,7 +276,7 @@ export function startServer() {
         }
         if (url.pathname === '/api/extension') {
           if (req.method === 'GET') {
-            json(200, { path: syncExtension(), browsers: BROWSERS.map((b) => ({ id: b.id, name: b.name })) });
+            json(200, { path: syncExtension(), seen: extensionSeen, browsers: BROWSERS.map((b) => ({ id: b.id, name: b.name })) });
             return;
           }
           if (req.method === 'POST') {

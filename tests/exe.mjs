@@ -1,5 +1,6 @@
 // 桌面版自测：node tests/exe.mjs
 // 用临时的用户目录启动 exe 和 Node 版本服务，对同一份数据调用接口，检查两边结果一致。
+import { request as httpRequest } from 'node:http';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,6 +33,19 @@ let exeInfo = null;
 for (let i = 0; i < 50 && !exeInfo; i++) {
   await sleep(150);
   try { const j = JSON.parse(readFileSync(stateFile, 'utf8')); if (j.port === 14611) exeInfo = j; } catch (e) { /* 还没写出来 */ }
+}
+
+// 带来源头发请求（fetch 不让页面脚本设置 Origin，这里用 http 模块）
+function pairAsk(info, origin) {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: '127.0.0.1', port: info.port, path: '/api/pair', method: 'POST', headers: origin ? { origin } : {} }, (res) => {
+      let t = '';
+      res.on('data', (d) => { t += d; });
+      res.on('end', () => resolve({ status: res.statusCode, text: t }));
+    });
+    req.on('error', reject);
+    req.end('');
+  });
 }
 
 async function call(info, path, opts) {
@@ -70,6 +84,14 @@ try {
   // 新建文件夹和按名字找文件夹：两个版本都要通过同样的检查
   async function folderChecks(label, info, made) {
     const post = (path, obj) => call(info, path, { method: 'POST', body: JSON.stringify(obj) });
+    const noOrigin = await pairAsk(info, '');
+    const fromPage = await pairAsk(info, 'https://example.com');
+    const fromChrome = await pairAsk(info, 'chrome-extension://abcdefabcdefabcdefabcdefabcdefab');
+    const fromFirefox = await pairAsk(info, 'moz-extension://11111111-2222-3333-4444-555555555555');
+    ok(label + '：网页和没有来源的请求拿不到口令', noOrigin.status === 403 && fromPage.status === 403 && !/token/.test(noOrigin.text + fromPage.text), [noOrigin.status, fromPage.status]);
+    ok(label + '：Chrome 和火狐扩展发来的请求能拿到口令', fromChrome.status === 200 && fromFirefox.status === 200 && JSON.parse(fromChrome.text).token === info.token && JSON.parse(fromFirefox.text).token === info.token, [fromChrome.text, fromFirefox.text]);
+    const afterPair = await call(info, '/api/extension');
+    ok(label + '：扩展联系过之后，扩展接口标出已联系', afterPair.json && afterPair.json.seen === true && afterPair.json.browsers.every((x) => ['edge', 'chrome', 'firefox'].indexOf(x.id) >= 0), afterPair.text.slice(0, 160));
     const ext = await call(info, '/api/extension');
     const extDir = ext.json && ext.json.path;
     ok(label + '：扩展文件放到了固定的文件夹', !!extDir && extDir.startsWith(home) && existsSync(join(extDir, 'manifest.json')) && existsSync(join(extDir, 'background.js')) && existsSync(join(extDir, 'icons', '128.png')), ext.text.slice(0, 160));

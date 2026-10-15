@@ -339,6 +339,8 @@ class Server
     static readonly Regex NotAFieldRe = new Regex("^(?:" + TbdAlt.Substring(3, TbdAlt.Length - 4) + "|" + Vocab.Alt(d => Vocab.List(d, "labels", "issues")) + ")$", RegexOptions.IgnoreCase);
     static Regex StateRe(string code) { return new Regex("^" + Vocab.Alt(d => new[] { Vocab.Sub(d, "states", code) }) + "$", RegexOptions.IgnoreCase); }
     readonly string home = Environment.GetEnvironmentVariable("USERPROFILE") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    // 浏览器扩展联系过本服务
+    volatile bool extensionSeen;
     readonly HashSet<string> connected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     // 拖入的文件夹按名字找到的候选，用户已经明确要打开它，可以连接
     readonly HashSet<string> offered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -391,6 +393,8 @@ class Server
             new[] { "edge", "Edge", Path.Combine(pf, "Microsoft", "Edge", "Application", "msedge.exe"), "edge://extensions/" },
             new[] { "chrome", "Chrome", Path.Combine(pf, "Google", "Chrome", "Application", "chrome.exe"), "chrome://extensions/" },
             new[] { "chrome", "Chrome", Path.Combine(pf86, "Google", "Chrome", "Application", "chrome.exe"), "chrome://extensions/" },
+            new[] { "firefox", "Firefox", Path.Combine(pf, "Mozilla Firefox", "firefox.exe"), "about:debugging#/runtime/this-firefox" },
+            new[] { "firefox", "Firefox", Path.Combine(pf86, "Mozilla Firefox", "firefox.exe"), "about:debugging#/runtime/this-firefox" },
         };
         var found = new List<string[]>();
         foreach (var b in all)
@@ -502,6 +506,15 @@ class Server
             var url = ctx.Request.Url;
             if (ctx.Request.Headers["Host"] != "127.0.0.1:" + port) { SendJson(ctx, 403, new { error = "host" }); return; }
             var path = url.AbsolutePath;
+            if (path == "/api/pair" && ctx.Request.HttpMethod == "POST")
+            {
+                // 只有扩展发来的请求（来源是扩展自己的地址）能拿到口令，网页拿不到
+                var origin = ctx.Request.Headers["Origin"] ?? "";
+                if (!origin.StartsWith("chrome-extension://") && !origin.StartsWith("moz-extension://")) { SendJson(ctx, 403, new { error = "origin" }); return; }
+                extensionSeen = true;
+                SendJson(ctx, 200, new { token = token });
+                return;
+            }
             if (path.StartsWith("/api/"))
             {
                 if (ctx.Request.Headers["x-shupian-token"] != token) { SendJson(ctx, 401, new { error = "token" }); return; }
@@ -566,7 +579,7 @@ class Server
         {
             if (ctx.Request.HttpMethod == "GET")
             {
-                SendJson(ctx, 200, new { path = SyncExtension(), browsers = Browsers().Select(b => new { id = b[0], name = b[1] }).ToList() });
+                SendJson(ctx, 200, new { path = SyncExtension(), seen = extensionSeen, browsers =Browsers().Select(b => new { id = b[0], name = b[1] }).ToList() });
                 return;
             }
             if (ctx.Request.HttpMethod == "POST")

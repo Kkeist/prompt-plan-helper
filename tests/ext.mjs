@@ -12,6 +12,15 @@ let pass = 0;
 const fails = [];
 const ok = (n, c, d) => { if (c) { pass++; console.log('  ✔ ' + n); } else { fails.push(n); console.log('  ✖ ' + n + (d !== undefined ? '  ' + JSON.stringify(d) : '')); } };
 
+// 扩展会在固定端口范围里找桌面版；已经有桌面版在运行时，扩展会连到那个真实的，测试没法隔离，先退出它再测
+for (let p = 14165; p < 14225; p++) {
+  const r = await fetch('http://127.0.0.1:' + p + '/api/pair', { method: 'POST' }).catch(() => null);
+  if (r) {
+    console.log('端口 ' + p + ' 上已有桌面版在运行：先退出托盘版再运行本测试。');
+    process.exit(2);
+  }
+}
+
 // 桌面服务：临时用户目录里放一个有计划书的文件夹
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const home = mkdtempSync(join(tmpdir(), 'shupian-ext-'));

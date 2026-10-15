@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "薯片计划助手",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "在任何网页上打开悬浮窗：选取元素、区域截图、记录当前页面，并复制修改说明。",
   "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
   "action": { "default_title": "薯片计划助手（Alt+Shift+S）", "default_icon": { "16": "icons/16.png", "32": "icons/32.png" } },
-  "background": { "service_worker": "background.js" },
+  "background": { "service_worker": "background.js", "scripts": ["background.js"] },
+  "browser_specific_settings": { "gecko": { "id": "plan-helper@shupian.local", "strict_min_version": "128.0" } },
   "permissions": ["storage"],
   "host_permissions": ["<all_urls>"],
   "commands": {
