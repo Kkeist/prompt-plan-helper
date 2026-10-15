@@ -7,6 +7,7 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using Microsoft.Win32;
 using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -20,7 +21,7 @@ using System.Windows.Forms;
 static class Program
 {
     // 自测时带上后缀，不和真正在运行的那一个抢
-    static readonly string Suffix = Environment.GetEnvironmentVariable("PLAN_HELPER_TEST") ?? "";
+    public static readonly string Suffix = Environment.GetEnvironmentVariable("PLAN_HELPER_TEST") ?? "";
     static readonly string SingleName = "prompt-plan-helper-single" + Suffix;
     static readonly string OpenEventName = "prompt-plan-helper-open" + Suffix;
 
@@ -32,6 +33,8 @@ static class Program
         {
             if (!created)
             {
+                // 已经在运行：让它把窗口拿到最前面（没有窗口就新开一个），并允许它抢到前台
+                WinApi.AllowSetForegroundWindow(-1);
                 try { EventWaitHandle.OpenExisting(OpenEventName).Set(); } catch (Exception) { }
                 return;
             }
@@ -39,6 +42,48 @@ static class Program
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new Host(OpenEventName));
         }
+    }
+}
+
+static class WinApi
+{
+    delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc p, IntPtr l);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+    [DllImport("user32.dll")] public static extern bool AllowSetForegroundWindow(int pid);
+
+    // 找已经打开的小窗口：浏览器应用窗口，标题是页面标题
+    public static IntPtr FindWindow(string[] titles)
+    {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((h, l) =>
+        {
+            if (!IsWindowVisible(h)) return true;
+            var cls = new StringBuilder(64);
+            GetClassName(h, cls, 64);
+            if (cls.ToString() != "Chrome_WidgetWin_1") return true;
+            var text = new StringBuilder(256);
+            GetWindowText(h, text, 256);
+            var s = text.ToString();
+            if (titles.Any(t => s == t)) { found = h; return false; }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    public static void Raise(IntPtr h)
+    {
+        if (IsIconic(h)) ShowWindow(h, 9);
+        // 按一下 Alt，系统才允许后台进程把窗口提到前台
+        keybd_event(0x12, 0, 0, UIntPtr.Zero);
+        keybd_event(0x12, 0, 2, UIntPtr.Zero);
+        SetForegroundWindow(h);
     }
 }
 
@@ -98,7 +143,8 @@ class Host : ApplicationContext
         hotkey.Pressed += OpenHub;
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add(zh ? "打开" : "Open", null, delegate { OpenHub(); });
+        var show = menu.Items.Add(zh ? "显示窗口" : "Show window", null, delegate { OpenHub(); });
+        show.Font = new Font(show.Font, FontStyle.Bold);
         menu.Items.Add(zh ? "退出" : "Exit", null, delegate { ExitThread(); });
         tray.Icon = Server.AppIcon();
         tray.Text = zh ? "prompt 计划书助手" : "Prompt plan helper";
@@ -110,10 +156,70 @@ class Host : ApplicationContext
             ? (zh ? "已在托盘运行，按 Ctrl+Alt+S 打开。" : "Running in the tray. Press Ctrl+Alt+S to open.")
             : (zh ? "已在托盘运行。快捷键 Ctrl+Alt+S 被占用，请点击托盘图标打开。" : "Running in the tray. Ctrl+Alt+S is taken; click the tray icon to open.");
         tray.ShowBalloonTip(4000);
+        PromoteTray();
+        // 自己启动时直接打开小窗口；自测时不弹
+        if (Program.Suffix == "") OpenHub();
+    }
+
+    // Windows 11 默认把新的托盘图标收进「^」里；条目出现后，把它设为直接显示在任务栏
+    // 用户自己改过的设置（已有 IsPromoted 值）不动
+    void PromoteTray()
+    {
+        var tries = 0;
+        var timer = new System.Windows.Forms.Timer { Interval = 800 };
+        timer.Tick += delegate
+        {
+            tries++;
+            var state = TrayPromotion();
+            if (state == 0 && tries < 6) return;
+            timer.Stop();
+            timer.Dispose();
+            if (state == 0)
+            {
+                tray.BalloonTipText = zh ? "托盘图标在任务栏右下角「^」里，可以拖到任务栏上固定显示。" : "The tray icon is under the ^ at the right of the taskbar. Drag it onto the taskbar to keep it visible.";
+                tray.ShowBalloonTip(6000);
+            }
+        };
+        timer.Start();
+    }
+
+    // 1：已设为显示或用户有自己的设置；0：还没有找到条目或不能写入
+    int TrayPromotion()
+    {
+        try
+        {
+            var exe = Application.ExecutablePath;
+            var hit = 0;
+            using (var root = Registry.CurrentUser.OpenSubKey(@"Control Panel\NotifyIconSettings", true))
+            {
+                if (root == null) return 0;
+                foreach (var name in root.GetSubKeyNames())
+                {
+                    using (var k = root.OpenSubKey(name, true))
+                    {
+                        var p = k.GetValue("ExecutablePath") as string;
+                        if (p == null || !string.Equals(p, exe, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (k.GetValue("IsPromoted") == null) k.SetValue("IsPromoted", 1, RegistryValueKind.DWord);
+                        hit++;
+                    }
+                }
+            }
+            return hit > 0 ? 1 : 0;
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
     }
 
     void OpenHub()
     {
+        var existing = WinApi.FindWindow(new[] { "prompt 计划书助手", "Prompt plan helper" });
+        if (existing != IntPtr.Zero)
+        {
+            WinApi.Raise(existing);
+            return;
+        }
         var url = server.Url("&win=1&view=hub");
         var browser = Server.FindBrowser();
         if (browser == null)

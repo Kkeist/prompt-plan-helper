@@ -5,7 +5,7 @@
 //   node tools/shupian.mjs app [hub|plan]                    打开桌面窗口（最近的文件夹，或计划书）
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STATE_FILE } from './app-server.mjs';
@@ -88,6 +88,50 @@ function browserPath() {
   return list.filter((p) => existsSync(p) && statSync(p).isFile())[0] || '';
 }
 
+// 已经有打开的小窗口时把它拿到最前面，返回 true；没有就返回 false
+const RAISE_SCRIPT = `
+Add-Type -TypeDefinition @'
+using System; using System.Text; using System.Runtime.InteropServices;
+public class W {
+  delegate bool P(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(P p, IntPtr l);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int c);
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern void keybd_event(byte v, byte s, uint f, UIntPtr e);
+  public static bool Raise() {
+    IntPtr hit = IntPtr.Zero;
+    EnumWindows((h, l) => {
+      if (!IsWindowVisible(h)) return true;
+      var c = new StringBuilder(64); GetClassName(h, c, 64);
+      if (c.ToString() != "Chrome_WidgetWin_1") return true;
+      var t = new StringBuilder(256); GetWindowText(h, t, 256);
+      if (t.ToString() == "prompt \u8BA1\u5212\u4E66\u52A9\u624B" || t.ToString() == "Prompt plan helper") { hit = h; return false; }
+      return true;
+    }, IntPtr.Zero);
+    if (hit == IntPtr.Zero) return false;
+    if (IsIconic(hit)) ShowWindow(hit, 9);
+    keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);
+    SetForegroundWindow(hit);
+    return true;
+  }
+}
+'@
+if ([W]::Raise()) { 'raised' } else { 'none' }
+`;
+
+function raiseExisting() {
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', RAISE_SCRIPT], { encoding: 'utf8', windowsHide: true });
+  if (r.status !== 0) {
+    console.error('无法检查已打开的窗口：' + (r.stderr || '').trim());
+    process.exit(2);
+  }
+  return /raised/.test(r.stdout);
+}
+
 async function ping(info) {
   try {
     const r = await fetch('http://127.0.0.1:' + info.port + '/api/ping', { headers: { 'x-shupian-token': info.token } });
@@ -112,6 +156,7 @@ async function app(view) {
     }
   }
   if (!(info && info.port)) { console.error('桌面服务没有启动。'); process.exit(2); }
+  if (raiseExisting()) { console.log('小窗口已经打开，已移到最前面。'); return; }
   const exe = browserPath();
   const hub = view !== 'plan';
   const url = 'http://127.0.0.1:' + info.port + '/index.html?k=' + info.token + '&win=1' + (hub ? '&view=hub' : '');
