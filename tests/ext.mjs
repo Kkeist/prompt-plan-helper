@@ -23,14 +23,13 @@ try {
   await page.eval('window.postMessage({ shupian: "open" }, "*")');
   await page.sleep(400);
   ok('消息可以打开小窗', await page.eval('(function(){var h=document.querySelector("[data-shupian]");var w=h.shadowRoot.querySelector(".win");return w.style.display!=="none"})()'));
-  await page.eval('(function(){var b=Array.prototype.filter.call(document.querySelector("[data-shupian]").shadowRoot.querySelectorAll("button"),function(x){return x.textContent==="截图"})[0];b.click()})()');
-  let kind = '';
-  for (let i = 0; i < 40 && !kind; i++) {
+  await page.eval('(function(){var b=Array.prototype.filter.call(document.querySelector("[data-shupian]").shadowRoot.querySelectorAll("button"),function(x){return x.textContent==="当前页面"})[0];b.click()})()');
+  let shot = false;
+  for (let i = 0; i < 60 && !shot; i++) {
     await page.sleep(150);
-    kind = await page.eval('(function(){var k=document.querySelector("[data-shupian]").shadowRoot.querySelector(".chipline span");return k?k.textContent:""})()');
+    shot = await page.eval('!!document.querySelector("[data-shupian]").shadowRoot.querySelector(".chipline img.shot")');
   }
-  ok('截图成功（真实截图或伪截图）', kind === '截图' || kind === '伪截图', kind);
-  console.log('  附图类型：' + kind);
+  ok('当前页面：带一张整页截图', shot);
 } finally {
   await chrome.close();
   srv.kill();
