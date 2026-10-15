@@ -50,3 +50,5 @@ node tests/exe.mjs          桌面版接口 / desktop version API
 ```
 
 MIT License.
+
+<sub>与 Claude 一起完成。 / Made together with Claude.</sub>

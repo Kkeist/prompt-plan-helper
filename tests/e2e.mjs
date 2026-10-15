@@ -194,6 +194,20 @@ try {
     ok('宽 ' + w + '：不溢出、整页不滚动、顶栏不过高', m.page <= 0 && m.body <= 0 && m.doc <= 0 && m.bad.length === 0 && m.head <= 110, m);
     await page.shot(join(shots, '04-功能清单-' + w + '.png'));
   }
+  await page.resize(360, 480);
+  console.log('点击编辑：页面位置不跳');
+  const tallIdx = await page.eval('(function(){var bs=__deep(".box");var best=0;bs.forEach(function(b,i){if(b.getBoundingClientRect().height>bs[best].getBoundingClientRect().height)best=i});return best})()');
+  await page.eval('(function(){var body=__one(".body");var b=__deep(".box")[' + tallIdx + '];body.scrollTop=0;var r=b.getBoundingClientRect(),br=body.getBoundingClientRect();body.scrollTop=r.top-br.top-120;})()');
+  await page.sleep(150);
+  const jb = await page.eval('(function(){var b=__deep(".box")[' + tallIdx + '].getBoundingClientRect();return {x:b.left+30,y:b.top+20,top:b.top,bottom:b.bottom,st:__one(".body").scrollTop,vb:__one(".body").getBoundingClientRect().bottom}})()');
+  ok('测试用的框比窗口剩余部分高', jb.bottom > jb.vb, jb);
+  await page.clickAt(jb.x, jb.y);
+  await page.sleep(250);
+  const ja = await page.eval('(function(){return {st:__one(".body").scrollTop,top:__deep(".box")[' + tallIdx + '].getBoundingClientRect().top,editing:!!__deep(".box")[' + tallIdx + '].querySelector("textarea")}})()');
+  ok('点击后进入编辑', ja.editing, ja);
+  ok('点击后页面位置不变（不跳到框底部）', Math.abs(ja.st - jb.st) <= 1 && Math.abs(ja.top - jb.top) <= 1, { before: jb.st, after: ja.st });
+  await page.key('Escape');
+  await page.sleep(150);
   await page.resize(1280, 800);
 
   // ================= 桌面服务 =================

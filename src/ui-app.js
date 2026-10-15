@@ -521,7 +521,9 @@ function createApp(opts) {
       clear(el);
       el.append(ta);
       autoGrow(ta);
-      ta.focus();
+      // 光标放在文末，但不让页面跟着滚到文末（框比窗口高时会跳到框底部）
+      ta.focus({ preventScroll: true });
+      ta.setSelectionRange(ta.value.length, ta.value.length);
     };
     el.addEventListener('click', (e) => { if (!e.target.closest('button') && !el.querySelector('textarea')) edit(); });
     el.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); edit(); } });
