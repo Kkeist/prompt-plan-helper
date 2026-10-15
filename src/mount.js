@@ -58,10 +58,10 @@ function mountPage(host) {
   const root = host.attachShadow({ mode: 'open' });
   root.append(styleEl());
   const wrap = h('div', { style: 'width:100%;height:100%' });
-  const inst = createApp({ root, defaultName: t('新项目'), folder: params.get('folder') || '' });
+  const inst = createApp({ root, defaultName: t('new_project'), folder: params.get('folder') || '' });
   wrap.append(inst.el);
   root.append(wrap);
-  document.title = t('prompt 计划书助手');
+  document.title = t('prompt_plan_helper');
   document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
   return { open() {}, close() {}, toggle() {}, mode: 'plan' };
 }
@@ -89,7 +89,7 @@ function mountFloat(autoOpen) {
   const root = host.attachShadow({ mode: 'open' });
   root.append(styleEl());
   const win = h('div', { class: 'win', style: 'display:none' });
-  const fab = h('button', { type: 'button', class: 'fab', title: t('prompt 计划书助手') + '（Alt+Shift+S）', 'aria-label': t('prompt 计划书助手') });
+  const fab = h('button', { type: 'button', class: 'fab', title: t('prompt_plan_helper') + '（Alt+Shift+S）', 'aria-label': t('prompt_plan_helper') });
   fab.innerHTML = ICON_SVG;
   root.append(win, fab);
 
@@ -173,17 +173,22 @@ function mountFloat(autoOpen) {
   const toggle = () => (isOpen ? close() : open());
 
   dragWith(fab, null, fabPos, placeFab, toggle);
+  // 窗口里除了按钮和输入框，哪里都能按住拖动；工具那一排的图标点一下收起
+  let downOnCollapse = false;
   dragWith(win, (e) => {
     const path = e.composedPath ? e.composedPath() : [];
-    let onBar = false;
+    downOnCollapse = false;
     for (let i = 0; i < path.length; i++) {
       const n = path[i];
       if (n === win) break;
-      if (n.tagName === 'BUTTON' || n.tagName === 'INPUT' || n.tagName === 'TEXTAREA') return false;
-      if (n.classList && n.classList.contains('head')) onBar = true;
+      if (n.classList && n.classList.contains('collapse')) { downOnCollapse = true; return true; }
+      if (n.tagName === 'BUTTON' || n.tagName === 'INPUT' || n.tagName === 'TEXTAREA' || n.tagName === 'IMG') return false;
     }
-    return onBar;
-  }, winPos, dragWin);
+    return true;
+  }, winPos, dragWin, () => {
+    // 按下的是工具那一排的图标，没有拖动：收起成悬浮图标（指针被窗口捕获，所以按下时记下）
+    if (downOnCollapse) close();
+  });
 
   document.addEventListener('keydown', (e) => {
     if (e.altKey && e.shiftKey && e.code === 'KeyS') { e.preventDefault(); toggle(); }

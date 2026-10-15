@@ -9,6 +9,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STATE_FILE } from './app-server.mjs';
+import { T, locales } from './text.mjs';
 
 const require = createRequire(import.meta.url);
 const Core = require('../src/core.js');
@@ -16,14 +17,14 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 function planPath(arg) {
   if (arg) return resolve(arg);
-  for (const n of ['plan.md', '计划书.md']) if (existsSync(resolve(n))) return resolve(n);
-  return resolve('plan.md');
+  for (const n of Core.PLAN_NAMES) if (existsSync(resolve(n))) return resolve(n);
+  return resolve(Core.PLAN_NAMES[0]);
 }
 
 function load(arg) {
   const path = planPath(arg);
   if (!existsSync(path)) {
-    console.error('找不到：' + path);
+    console.error(T('not_found', { path }));
     process.exit(2);
   }
   return { path, md: readFileSync(path, 'utf8') };
@@ -35,19 +36,19 @@ function check(arg) {
   const total = list.reduce((s, x) => s + x.count, 0);
   const s = Core.structure(md);
   const dup = (arr) => arr.map((x) => x.name).filter((n, i, a) => a.indexOf(n) !== i);
-  console.log('文件：' + path);
-  console.log('项目：' + (Core.titleName(md) || '（未命名）'));
-  console.log('状态：' + (Core.statusLabel(Core.getStatus(md), Core.docLang(md)) || '（没有状态行）'));
-  console.log('页面 ' + s.pages.length + ' 个，功能 ' + s.features.length + ' 个');
-  console.log('待补：' + total + ' 处');
-  list.forEach((x) => console.log('  第 ' + (x.line + 1) + ' 行　' + x.text));
+  console.log(T('file_label', { path }));
+  console.log(T('project_label', { name: Core.titleName(md) || T('unnamed') }));
+  console.log(T('status_label', { state: Core.statusLabel(Core.getStatus(md), Core.docLang(md)) || T('no_status_line') }));
+  console.log(T('counts', { pages: s.pages.length, features: s.features.length }));
+  console.log(T('tbd_count', { n: total }));
+  list.forEach((x) => console.log(T('tbd_line', { line: x.line + 1, text: x.text })));
   const problems = [];
-  dup(s.pages).forEach((n) => problems.push('页面重名：' + n));
-  dup(s.features).forEach((n) => problems.push('功能重名：' + n));
-  if (Core.getStatus(md) === 'approved' && total > 0) problems.push('状态是已通过，但还有待补');
-  problems.forEach((p) => console.log('问题：' + p));
+  dup(s.pages).forEach((n) => problems.push(T('dup_page', { name: n })));
+  dup(s.features).forEach((n) => problems.push(T('dup_feature', { name: n })));
+  if (Core.getStatus(md) === 'approved' && total > 0) problems.push(T('approved_but_tbd'));
+  problems.forEach((x) => console.log(T('problem', { text: x })));
   const ok = total === 0 && problems.length === 0;
-  console.log(ok ? '结论：没有待补，确认后可以开始做。' : '结论：还不能开始做。');
+  console.log(ok ? T('verdict_ok') : T('verdict_no'));
   process.exit(ok ? 0 : 1);
 }
 
@@ -60,22 +61,54 @@ function progress(args) {
   if (!rest.length) {
     list.forEach((x) => console.log((x.no ? x.no + ' ' : '') + x.name + '　' + x.status + (x.what ? '　' + x.what : '')));
     const done = list.filter((x) => x.status === 'done').length;
-    console.log('已完成 ' + done + ' / ' + list.length);
+    console.log(T('progress_total', { done, total: list.length }));
     return;
   }
   const status = rest.pop();
   const name = rest.join(' ').trim();
   if (['todo', 'doing', 'done'].indexOf(status) < 0) {
-    console.error('进度只能是 todo、doing、done');
+    console.error(T('progress_states'));
     process.exit(2);
   }
   const hit = list.filter((x) => x.name === name || x.no === name || (x.no + ' ' + x.name) === name)[0];
   if (!hit) {
-    console.error('没有这个功能：' + name);
+    console.error(T('no_such_feature', { name }));
     process.exit(2);
   }
   writeFileSync(path, Core.setProgress(md, hit.line, status));
-  console.log('已更新：' + hit.name + ' → ' + status);
+  console.log(T('progress_updated', { name: hit.name, status }));
+}
+
+// 每条问题一行，带序号和状态；改状态：issue <序号> todo|doing|done，AI 处理时一条一条地标
+function issueNames() {
+  return { todo: T('issue_todo'), doing: T('issue_doing'), done: T('issue_done') };
+}
+
+function issueRows(md) {
+  const rows = [];
+  Core.issueList(md).forEach((f) => f.items.forEach((it) => rows.push({ feature: (f.no ? f.no + ' ' : '') + f.name, line: it.line, state: it.state, text: it.text })));
+  return rows;
+}
+
+function issues(args) {
+  const { md } = load(args[0]);
+  const rows = issueRows(md);
+  if (!rows.length) { console.log(T('no_issues')); return; }
+  const names = issueNames();
+  rows.forEach((r, i) => console.log(T('issue_line', { n: i + 1, state: names[r.state], feature: r.feature, text: r.text })));
+}
+
+function issue(args) {
+  const rest = args.slice();
+  const file = rest.length && /\.md$/i.test(rest[0]) ? rest.shift() : '';
+  const n = Number(rest[0]);
+  const state = rest[1];
+  if (['todo', 'doing', 'done'].indexOf(state) < 0) { console.error(T('issue_states')); process.exit(2); }
+  const { path, md } = load(file);
+  const row = issueRows(md)[n - 1];
+  if (!row) { console.error(T('no_such_issue', { n: rest[0] })); process.exit(2); }
+  writeFileSync(path, Core.setIssueState(md, row.line, state));
+  console.log(T('issue_updated', { n, state: issueNames()[state] }));
 }
 
 function browserPath() {
@@ -102,14 +135,14 @@ public class W {
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int c);
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] static extern void keybd_event(byte v, byte s, uint f, UIntPtr e);
-  public static bool Raise() {
+  public static bool Raise(string[] titles) {
     IntPtr hit = IntPtr.Zero;
     EnumWindows((h, l) => {
       if (!IsWindowVisible(h)) return true;
       var c = new StringBuilder(64); GetClassName(h, c, 64);
       if (c.ToString() != "Chrome_WidgetWin_1") return true;
       var t = new StringBuilder(256); GetWindowText(h, t, 256);
-      if (t.ToString() == "prompt \u8BA1\u5212\u4E66\u52A9\u624B" || t.ToString() == "Prompt plan helper") { hit = h; return false; }
+      if (Array.IndexOf(titles, t.ToString()) >= 0) { hit = h; return false; }
       return true;
     }, IntPtr.Zero);
     if (hit == IntPtr.Zero) return false;
@@ -120,13 +153,15 @@ public class W {
   }
 }
 '@
-if ([W]::Raise()) { 'raised' } else { 'none' }
+if ([W]::Raise([string[]]($env:SHUPIAN_TITLES -split '\|'))) { 'raised' } else { 'none' }
 `;
 
 function raiseExisting() {
-  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', RAISE_SCRIPT], { encoding: 'utf8', windowsHide: true });
+  // 小窗口的标题：每种语言里页面标题的文字
+  const titles = Object.keys(locales).map((k) => locales[k].ui.prompt_plan_helper).join('|');
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', RAISE_SCRIPT], { encoding: 'utf8', windowsHide: true, env: Object.assign({}, process.env, { SHUPIAN_TITLES: titles }) });
   if (r.status !== 0) {
-    console.error('无法检查已打开的窗口：' + (r.stderr || '').trim());
+    console.error(T('window_check_failed', { why: (r.stderr || '').trim() }));
     process.exit(2);
   }
   return /raised/.test(r.stdout);
@@ -155,21 +190,23 @@ async function app(view) {
       if (info && info.port && (await ping(info))) break;
     }
   }
-  if (!(info && info.port)) { console.error('桌面服务没有启动。'); process.exit(2); }
-  if (raiseExisting()) { console.log('小窗口已经打开，已移到最前面。'); return; }
+  if (!(info && info.port)) { console.error(T('service_not_started')); process.exit(2); }
+  if (raiseExisting()) { console.log(T('window_raised')); return; }
   const exe = browserPath();
   const hub = view !== 'plan';
   const url = 'http://127.0.0.1:' + info.port + '/index.html?k=' + info.token + '&win=1' + (hub ? '&view=hub' : '');
-  if (!exe) { console.error('没有找到 Edge 或 Chrome，请直接打开：' + url); process.exit(2); }
+  if (!exe) { console.error(T('no_browser', { url })); process.exit(2); }
   spawn(exe, ['--app=' + url, '--window-size=360,480'], { detached: true, stdio: 'ignore' }).unref();
-  console.log('已打开：' + url.replace(info.token, '***'));
+  console.log(T('opened', { url: url.replace(info.token, '***') }));
 }
 
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === 'check') check(args[0]);
 else if (cmd === 'progress') progress(args);
+else if (cmd === 'issues') issues(args);
+else if (cmd === 'issue') issue(args);
 else if (cmd === 'app') app(args[0]).then(() => process.exit(0));
 else {
-  console.log('用法：node tools/shupian.mjs check [计划书] | progress [计划书] [功能名 todo|doing|done] | app [hub|plan]');
+  console.log(T('usage'));
   process.exit(cmd ? 2 : 0);
 }

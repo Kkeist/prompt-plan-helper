@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { T } from './text.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const web = join(root, 'web');
@@ -14,7 +15,7 @@ const csc = [
 ].filter(existsSync)[0];
 
 if (!csc) {
-  console.error('找不到 csc.exe（.NET Framework 4）。只能在 Windows 上生成桌面版。');
+  console.error(T('csc_not_found'));
   process.exit(1);
 }
 
@@ -34,6 +35,10 @@ const args = [
   '/win32icon:' + join(web, 'shupian.ico'),
   '/r:System.dll', '/r:System.Core.dll', '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.Web.Extensions.dll',
 ];
+// 语言文件嵌进去，菜单文字和计划书格式里的固定词从这里取
+readdirSync(join(root, 'locales')).filter((n) => n.endsWith('.json')).forEach((n) => {
+  args.push('/resource:' + join(root, 'locales', n) + ',locale/' + n);
+});
 files(web).forEach((f) => {
   const logical = 'web/' + relative(web, f).replace(/\\/g, '/');
   args.push('/resource:' + f + ',' + logical);

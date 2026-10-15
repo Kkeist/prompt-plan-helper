@@ -55,22 +55,35 @@ const LS = {
 };
 
 // ---------- 语言 ----------
-// 界面文字直接写中文原文，t() 按当前语言换成英文词条；没有词条就原样显示。
+// 界面文字都在 locales/<语言>.json 的 ui 部分，代码里只写键；LOCALES 由构建注入。
+// 缺键时显示键名并报错，不回退成别的语言。
+
+const LANG_LIST = Object.keys(LOCALES);
 
 let LANG = (function () {
   const saved = LS.get('shupian:lang', '');
-  if (saved === 'zh' || saved === 'en') return saved;
-  return /^zh/i.test(navigator.language || '') ? 'zh' : 'en';
+  if (LOCALES[saved]) return saved;
+  const lang = String(navigator.language || '').toLowerCase();
+  return LANG_LIST.filter((k) => lang.indexOf(k) === 0)[0] || 'en';
 })();
 
-function t(zh, params) {
-  let s = LANG === 'en' && EN_DICT[zh] !== undefined ? EN_DICT[zh] : zh;
+// 指定语言的文字（比如要写进某份计划书的语言）
+function tl(lang, key, params) {
+  let s = LOCALES[lang].ui[key];
+  if (s === undefined) {
+    console.error('Missing text key: ' + key + ' (' + lang + ')');
+    return '[' + key + ']';
+  }
   if (params) Object.keys(params).forEach((k) => { s = s.split('{' + k + '}').join(String(params[k])); });
   return s;
 }
 
+function t(key, params) {
+  return tl(LANG, key, params);
+}
+
 function setLang(l) {
-  LANG = l === 'en' ? 'en' : 'zh';
+  LANG = LOCALES[l] ? l : LANG;
   LS.set('shupian:lang', LANG);
 }
 
@@ -168,20 +181,25 @@ const Folder = {
     for (const part of sub || []) d = await d.getDirectoryHandle(part, { create: !!create });
     return d;
   },
-  async read(handle, sub, name) {
+  // 文件不存在返回 null；存在返回 { text, mtime }（mtime 是文件的修改时间，毫秒）
+  async readInfo(handle, sub, name) {
     if (handle.server) {
       const p = (sub || []).concat([name]).join('/');
       const r = await Api.call('GET', '/api/file?root=' + encodeURIComponent(handle.root) + '&p=' + encodeURIComponent(p));
-      return r.exists ? r.text : null;
+      return r.exists ? { text: r.text, mtime: r.mtime || 0 } : null;
     }
     try {
       const d = await Folder.dir(handle, sub, false);
       const f = await (await d.getFileHandle(name)).getFile();
-      return await f.text();
+      return { text: await f.text(), mtime: f.lastModified || 0 };
     } catch (e) {
       if (e && e.name === 'NotFoundError') return null;
       throw e;
     }
+  },
+  async read(handle, sub, name) {
+    const r = await Folder.readInfo(handle, sub, name);
+    return r ? r.text : null;
   },
   async write(handle, sub, name, data) {
     if (handle.server) {

@@ -1,19 +1,15 @@
 'use strict';
-// 悬浮在别的页面上的小窗：指出一个东西、框一块区域或记下当前页面、写一句话，合成一段话复制给 AI。
-// 一次可以攒多条问题。在浏览器扩展里并且打开过桌面小窗口时，每条问题可以选一个功能（输入 @ 切换），
-// 再一起记到计划书里对应功能的下面。
+// 悬浮在别的页面上的小窗：指出一个东西、框一块区域或记下当前页面，用列表一次写下多个问题，合成一段话复制给 AI。
+// 在浏览器扩展里并且打开过桌面小窗口时，每一行可以选一个功能（输入 @ 切换），再一起记到计划书里对应功能的下面。
 
 function createFeedback(opts) {
   const tools = opts.tools;
   const app = h('div', { class: 'app fb' });
-  const head = h('div', { class: 'head' });
   const body = h('div', { class: 'fb-body' });
-  app.append(head, body);
+  app.append(body);
   const kit = createKit(app);
-  // 当前正在写的一条
-  const S = { text: '', element: '', styles: '', info: null, shot: null };
-  // 已经写好、还没有记进计划书的
-  const queue = [];
+  // 当前页面的信息和截图，整批问题共用
+  const S = { info: null, shot: null };
   // 计划书通道：off（不可用，why 说明原因）、loading、ready、empty（没有计划书或没有功能）
   // projects 里每一项是一份计划书：{ path, name（文件夹名）, file, summary, multi（这个文件夹里有多份）}
   const link = { state: Link.available ? 'loading' : 'off', why: '', projects: [], project: null, features: [], target: null };
@@ -22,60 +18,65 @@ function createFeedback(opts) {
   const planUrl = (x) => '/api/file?root=' + encodeURIComponent(x.path) + '&p=' + encodeURIComponent(x.file);
   const featLabel = (f) => (f.no ? f.no + ' ' : '') + f.name;
 
+  const list = createIssueList({
+    kit,
+    features: () => (link.state === 'ready' ? link.features : []),
+    placeholder: () => (link.state === 'ready' ? t('describe_the_issue_you_can_several_features') : t('describe_what_to_change')),
+    onTarget(f) { link.target = f; rememberTarget(); },
+    // 每一条可以带多个元素：行上的按钮再选一个，下面一个元素一行，可以单独去掉
+    rowTools(row) {
+      return [h('button', { type: 'button', class: 'btn sm', onclick: () => pickInto(row) }, '＋ ' + t('pick_an_element'))];
+    },
+    rowExtra(row, repaint) {
+      const els = row.data.elements || [];
+      if (!els.length) return null;
+      return h('div', null, els.map((e, i) => h('div', { class: 'chipline' }, h('span', { text: e.path }),
+        h('button', { type: 'button', class: 'x', title: t('clear'), onclick() { els.splice(i, 1); repaint(); } }, '✕'))));
+    },
+    onLayout() { if (opts.onLayout) opts.onLayout(); },
+  });
+
   const logo = document.createElement('span');
   logo.className = 'logo';
   logo.innerHTML = ICON_SVG;
-  head.append(h('div', { class: 'in drag' },
-    h('span', { class: 'brand' }, logo, h('span', { class: 'brand-name', text: t('标记要修改的位置') })),
-    h('span', { class: 'sp' }),
-    h('button', { type: 'button', class: 'x', title: t('关闭'), 'aria-label': t('关闭'), onclick: opts.onClose }, '✕')));
+  // 没有顶栏：图标是工具那一排的第一个按钮，点一下收起；按住窗口里的空白处或图标拖动（在 mount 里处理）
+  const collapse = h('span', { class: 'collapse', title: t('collapse'), 'aria-label': t('collapse') }, logo);
 
   function infoLines() {
     if (!S.info) return [];
     const i = S.info;
     const out = [];
-    if (i.title) out.push((LANG === 'zh' ? '页面标题：' : 'Page title: ') + i.title);
-    if (i.headings.length) out.push((LANG === 'zh' ? '页面上能看到的标题：' : 'Headings on the page: ') + i.headings.join(' / '));
-    if (i.controls.length) out.push((LANG === 'zh' ? '页面上能点的东西：' : 'Things to click on the page: ') + i.controls.join(' / '));
+    if (i.title) out.push(t('page_title_label') + i.title);
+    if (i.headings.length) out.push(t('headings_label') + i.headings.join(' / '));
+    if (i.controls.length) out.push(t('controls_label') + i.controls.join(' / '));
     return out;
   }
 
-  function whereText() {
+  const elementsOf = (it) => it.data.elements || [];
+  // 多个元素编号，一个元素不编号
+  const numbered = (arr, pick) => arr.map((e, i) => (arr.length > 1 ? (i + 1) + ') ' : '') + pick(e)).join(arr.length > 1 ? '\n' : '');
+
+  // 记进计划书时，每条后面带上页面地址和元素
+  function whereText(it) {
     const ctx = tools.context();
     const out = [];
-    try { const u = new URL(ctx.page); out.push((LANG === 'zh' ? '页面：' : 'Page: ') + u.host + u.pathname); } catch (e) { /* 地址不是标准网址时不写页面 */ }
-    if (S.element) out.push((LANG === 'zh' ? '元素：' : 'Element: ') + S.element);
+    try { const u = new URL(ctx.page); out.push(t('where_page') + u.host + u.pathname); } catch (e) { /* 地址不是标准网址时不写页面 */ }
+    elementsOf(it).forEach((e) => out.push(t('where_element') + e.path));
     return out.length ? '（' + out.join('；') + '）' : '';
   }
 
-  // 正在写的这一条的快照；没写字就是 null
-  function snapshot() {
-    const text = S.text.trim();
-    if (!text) return null;
-    const ctx = tools.context();
-    return {
-      text, element: S.element, styles: S.styles, page: ctx.page, view: ctx.view, where: whereText(),
-      no: link.target ? link.target.no : '', name: link.target ? link.target.name : '', label: link.target ? featLabel(link.target) : '',
-    };
-  }
-
   function feedbackText() {
-    const cur = snapshot();
-    const all = queue.concat(cur ? [cur] : []);
+    const ctx = tools.context();
+    const items = list.items();
     const errors = tools.errors();
-    const shot = S.shot ? t('截图已复制到剪贴板，请另行粘贴') : '';
-    if (all.length <= 1) {
-      const one = all[0];
-      const ctx = tools.context();
-      return Core.buildFeedback({
-        text: one ? one.text : '', page: one ? one.page : ctx.page, view: one ? one.view : ctx.view, element: one ? one.element : S.element,
-        styles: one ? one.styles : S.styles, summary: infoLines(), errors, shot,
-      }, LANG);
-    }
-    return all.map((it, i) => (i + 1) + '. ' + (it.label ? '@ ' + it.label : '') + '\n' + Core.buildFeedback({
-      text: it.text, page: it.page, view: it.view, element: it.element, styles: it.styles,
-      summary: i === 0 ? infoLines() : [], errors: i === 0 ? errors : [], shot: i === 0 ? shot : '',
-    }, LANG)).join('\n');
+    const shot = S.shot ? t('the_screenshot_is_on_the_clipboard_paste_it') : '';
+    const one = (it, first) => Core.buildFeedback({
+      text: it ? it.text : '', page: ctx.page, view: ctx.view,
+      element: it ? numbered(elementsOf(it), (e) => e.path) : '', styles: it ? numbered(elementsOf(it), (e) => e.styles) : '',
+      summary: first ? infoLines() : [], errors: first ? errors : [], shot: first ? shot : '',
+    }, LANG);
+    if (items.length <= 1) return one(items[0], true);
+    return items.map((it, i) => (i + 1) + '. ' + (it.fs.length ? it.fs.map((f) => '@ ' + featLabel(f)).join(' ') : '') + '\n' + one(it, i === 0)).join('\n');
   }
 
   async function loadPlan() {
@@ -108,6 +109,7 @@ function createFeedback(opts) {
       link.state = 'off';
       link.why = e.message === 'unpaired' ? 'unpaired' : 'down';
     }
+    list.syncTargets(link.state === 'ready' ? link.target : null);
     render();
   }
 
@@ -115,65 +117,47 @@ function createFeedback(opts) {
     if (link.project && link.target) LS.set(targetKey, { path: link.project.path, file: link.project.file, no: link.target.no, name: link.target.name });
   }
 
-  // 功能列表，下面接可换的计划书
-  function chooseTarget(anchor, after) {
+  // 换一份计划书
+  function choosePlan(anchor) {
     kit.openPop(anchor, (pop, close) => {
-      link.features.forEach((f) => pop.append(h('button', { type: 'button', class: f === link.target ? 'on' : '', onclick() {
-        link.target = f;
-        rememberTarget();
+      link.projects.forEach((x) => pop.append(h('button', { type: 'button', class: x === link.project ? 'on' : '', onclick: async () => {
         close();
+        link.project = x;
+        link.target = null;
+        try { await loadPlan(); } catch (e) { link.state = 'off'; link.why = 'down'; }
+        rememberTarget();
+        list.syncTargets(link.state === 'ready' ? link.target : null);
         render();
-        if (after) after();
-      } }, featLabel(f))));
-      if (link.projects.length > 1) {
-        pop.append(h('hr'));
-        link.projects.forEach((x) => pop.append(h('button', { type: 'button', class: x === link.project ? 'on' : '', onclick: async () => {
-          close();
-          link.project = x;
-          link.target = null;
-          try { await loadPlan(); } catch (e) { link.state = 'off'; link.why = 'down'; }
-          rememberTarget();
-          render();
-        } }, t('计划书：{name}', { name: planName(x) }))));
-      }
+      } }, planName(x))));
     });
   }
 
-  // 把正在写的这一条放进列表，输入框清空准备写下一条
-  function addAnother() {
-    const cur = snapshot();
-    if (!cur) { kit.toast(t('请先写下问题。')); return; }
-    queue.push(cur);
-    S.text = '';
-    S.element = '';
-    S.styles = '';
-    render();
-  }
-
   async function record() {
-    const cur = snapshot();
-    const all = queue.concat(cur ? [cur] : []);
-    if (!all.length) { kit.toast(t('请先写下问题。')); return; }
+    const items = list.items();
+    if (!items.length) { kit.toast(t('write_the_issue_first')); return; }
+    if (items.some((it) => !it.fs.length)) { kit.toast(t('choose_a_feature_for_every_issue')); return; }
     try {
       const f = await Link.call('GET', planUrl(link.project));
       const feats = f.exists ? Core.issueList(f.text) : [];
-      const items = all.map((it) => ({ it, hit: feats.filter((x) => x.no === it.no && x.name === it.name)[0] }));
-      const lost = items.filter((x) => !x.hit);
+      // 一条问题 @ 了几个功能，就记到每个功能下面
+      const hits = [];
+      items.forEach((it) => it.fs.forEach((g) => hits.push({ it, g, hit: feats.filter((x) => x.no === g.no && x.name === g.name)[0] })));
+      const lost = hits.filter((x) => !x.hit);
       if (lost.length) {
         await loadPlan();
+        list.syncTargets(link.state === 'ready' ? link.target : null);
         render();
-        kit.toast(t('计划书里已经没有这些功能：{names}，请重新选择。', { names: lost.map((x) => x.it.label || t('未选功能')).join('、') }));
+        kit.toast(t('these_features_are_no_longer_in_the_plan', { names: lost.map((x) => featLabel(x.g)).join(LOCALES[LANG].doc.listSep) }));
         return;
       }
-      const r = Core.addIssues(f.text, items.map((x) => ({ featureLine: x.hit.featureLine, text: x.it.text + x.it.where })), Core.today());
-      if (!r.ok) { kit.toast(t('请先写下问题。')); return; }
+      const r = Core.addIssues(f.text, hits.map((x) => ({ featureLine: x.hit.featureLine, text: x.it.text + whereText(x.it) })), Core.today());
+      if (!r.ok) { kit.toast(t('write_the_issue_first')); return; }
       await Link.call('PUT', planUrl(link.project), r.md);
-      queue.length = 0;
-      S.text = '';
+      list.reset(link.target);
       render();
-      kit.toast(t('已记 {n} 条问题到计划书。', { n: r.added }));
+      kit.toast(t('added_n_issues_to_the_plan', { n: r.added }));
     } catch (e) {
-      kit.toast(t('没有记进计划书：{why}', { why: e.message === 'down' ? t('桌面小窗口没有响应。') : errText(e) }));
+      kit.toast(t('could_not_add_to_the_plan_why', { why: e.message === 'down' ? t('the_desktop_window_did_not_respond') : errText(e) }));
     }
   }
 
@@ -182,12 +166,18 @@ function createFeedback(opts) {
     S.shot = r ? { blob: r.blob, kind: r.kind, url: URL.createObjectURL(r.blob) } : null;
   }
 
-  async function pick() {
+  // 选取一个元素，加到指定的这一条上；可以连着选多个
+  async function pickInto(row) {
     const r = await tools.pick();
     if (!r) return;
-    S.element = r.path;
-    S.styles = r.styles;
+    (row.data.elements = row.data.elements || []).push({ path: r.path, styles: r.styles });
+    list.paint();
     render();
+  }
+
+  // 顶上的「选取元素」加到当前这一条
+  function pick() {
+    return pickInto(list.focusedRow());
   }
 
   async function region() {
@@ -197,7 +187,7 @@ function createFeedback(opts) {
       setShot(r);
       render();
     } catch (e) {
-      kit.toast(t('截图失败：{why}', { why: errText(e) }));
+      kit.toast(t('capture_failed_why', { why: errText(e) }));
     }
   }
 
@@ -208,69 +198,54 @@ function createFeedback(opts) {
       setShot(r.shot);
       render();
     } catch (e) {
-      kit.toast(t('截图失败：{why}', { why: errText(e) }));
+      kit.toast(t('capture_failed_why', { why: errText(e) }));
     }
   }
 
   async function copyShot() {
     if (!S.shot) return;
-    if (await copyImage(S.shot.blob)) { kit.toast(t('截图已复制。')); return; }
-    kit.toast(t('已下载：{name}', { name: download(S.shot.blob, 'screenshot', 'webp', 'image/webp') }));
+    if (await copyImage(S.shot.blob)) { kit.toast(t('screenshot_copied')); return; }
+    kit.toast(t('downloaded_name', { name: download(S.shot.blob, 'screenshot', 'webp', 'image/webp') }));
   }
 
   function render() {
     clear(body);
     body.append(h('div', { class: 'row tight' },
-      h('button', { type: 'button', class: 'btn', onclick: pick }, t('选取元素')),
-      h('button', { type: 'button', class: 'btn', onclick: region }, t('区域截图')),
-      h('button', { type: 'button', class: 'btn', onclick: currentPage }, t('当前页面'))));
-    queue.forEach((it, i) => {
-      body.append(h('div', { class: 'chipline queued' },
-        h('span', { text: (it.label ? '@ ' + it.label + '　' : '') + it.text }),
-        h('button', { type: 'button', class: 'x', title: t('删除'), 'aria-label': t('删除'), onclick() { queue.splice(i, 1); render(); } }, '✕')));
-    });
-    if (S.element) {
-      body.append(h('div', { class: 'chipline' }, h('span', { text: S.element }),
-        h('button', { type: 'button', class: 'x', title: t('清除'), onclick() { S.element = ''; S.styles = ''; render(); } }, '✕')));
-    }
+      collapse,
+      h('button', { type: 'button', class: 'btn', onclick: pick }, t('pick_an_element')),
+      h('button', { type: 'button', class: 'btn', onclick: region }, t('region_screenshot')),
+      h('button', { type: 'button', class: 'btn', onclick: currentPage }, t('current_page'))));
     if (S.info) {
-      body.append(h('div', { class: 'chipline' }, h('span', { text: t('当前页面：{title}', { title: S.info.title || tools.context().page }) }),
-        h('button', { type: 'button', class: 'x', title: t('清除'), onclick() { S.info = null; render(); } }, '✕')));
+      body.append(h('div', { class: 'chipline' }, h('span', { text: t('current_page_title', { title: S.info.title || tools.context().page }) }),
+        h('button', { type: 'button', class: 'x', title: t('clear'), onclick() { S.info = null; render(); } }, '✕')));
     }
     if (S.shot) {
       body.append(h('div', { class: 'chipline' },
-        h('img', { class: 'shot', src: S.shot.url, alt: t('截图') }),
-        h('span', { text: S.shot.kind }),
-        h('button', { type: 'button', class: 'x', title: t('清除'), onclick() { setShot(null); render(); } }, '✕')));
+        h('img', { class: 'shot', src: S.shot.url, alt: t('screenshot') }),
+        h('span', { text: S.shot.kind === 'simulated' ? t('kind_fake_shot') : t('kind_shot') }),
+        h('button', { type: 'button', class: 'x', title: t('clear'), onclick() { setShot(null); render(); } }, '✕')));
     }
     const ready = link.state === 'ready';
     if (ready) {
-      const label = h('button', { type: 'button', class: 'btn sm target', title: t('点击更换功能') }, '@ ' + featLabel(link.target));
-      label.addEventListener('click', () => chooseTarget(label));
-      body.append(h('div', { class: 'field' }, label, h('div', { class: 'muted', text: planName(link.project) })));
+      if (link.projects.length > 1) {
+        const plan = h('button', { type: 'button', class: 'link plan-pick', title: t('change_the_plan') }, planName(link.project) + ' ▾');
+        plan.addEventListener('click', () => choosePlan(plan));
+        body.append(plan);
+      } else {
+        body.append(h('div', { class: 'muted', text: planName(link.project) }));
+      }
     } else if (link.state !== 'loading' && Link.available) {
-      const why = link.state === 'empty' ? (link.project ? t('这个计划书里还没有功能。') : t('没有找到带计划书的文件夹。'))
-        : link.why === 'unpaired' ? t('先打开桌面小窗口，才能记进计划书。') : t('桌面小窗口没有响应，只能复制文字。');
+      const why = link.state === 'empty' ? (link.project ? t('this_plan_has_no_features_yet') : t('no_folder_with_a_plan_was_found'))
+        : link.why === 'unpaired' ? t('open_the_desktop_window_first_to_add_issues') : t('the_desktop_window_did_not_respond_only');
       body.append(h('p', { class: 'hint', text: why }));
     }
-    const ta = h('textarea', { class: 'in', rows: 3, placeholder: ready ? t('说明遇到的问题，输入 @ 选择功能。') : t('说明需要修改的内容。'), value: S.text, 'aria-label': t('修改说明') });
-    ta.addEventListener('input', () => {
-      S.text = ta.value;
-      autoGrow(ta);
-      if (ready && /@$/.test(ta.value)) {
-        ta.value = ta.value.slice(0, -1);
-        S.text = ta.value;
-        chooseTarget(ta, () => ta.focus({ preventScroll: true }));
-      }
-    });
-    body.append(ta);
+    body.append(list.el);
     body.append(h('div', { class: 'row' },
-      h('button', { type: 'button', class: 'btn', onclick: addAnother }, t('再写一条')),
-      ready ? h('button', { type: 'button', class: 'btn primary', onclick: record }, t('记到计划书')) : null,
-      h('button', { type: 'button', class: ready ? 'btn' : 'btn primary', onclick() { copyThen(kit, feedbackText()); } }, t('复制文字')),
-      S.shot ? h('button', { type: 'button', class: 'btn', onclick: copyShot }, t('复制截图')) : null));
+      ready ? h('button', { type: 'button', class: 'btn primary', onclick: record }, t('add_to_plan')) : null,
+      h('button', { type: 'button', class: ready ? 'btn' : 'btn primary', onclick() { copyThen(kit, feedbackText()); } }, t('copy_text')),
+      S.shot ? h('button', { type: 'button', class: 'btn', onclick: copyShot }, t('copy_screenshot')) : null));
     // 内容长高后，窗口要重新拉回屏幕内
-    setTimeout(() => { autoGrow(ta); if (opts.onLayout) opts.onLayout(); }, 0);
+    setTimeout(() => { if (opts.onLayout) opts.onLayout(); }, 0);
   }
 
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && kit.escape()) e.preventDefault(); });

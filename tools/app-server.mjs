@@ -18,7 +18,7 @@ const home = homedir();
 export const STATE_DIR = join(home, '.shupian');
 export const STATE_FILE = join(STATE_DIR, 'server.json');
 const HISTORY_FILE = join(STATE_DIR, 'history.json');
-const PLAN_NAMES = ['plan.md', '计划书.md'];
+const PLAN_NAMES = Core.PLAN_NAMES;
 const IDLE_MS = 30 * 60 * 1000;
 const ACTIVE_MS = 10 * 60 * 1000;
 
@@ -54,7 +54,7 @@ function claudeFolders() {
 }
 
 // 计划书文件：plan.md、计划书.md，以及同一个文件夹里的多份：plan-名称.md、计划书-名称.md
-const PLAN_FILE_RE = /^(?:plan|计划书)(?:-[^\\/:*?"<>|]{1,60})?\.md$/i;
+const PLAN_FILE_RE = Core.PLAN_FILE_RE;
 const CURRENT_FILE = join(STATE_DIR, 'current.json');
 
 function planFiles(root) {
@@ -269,7 +269,7 @@ export function startServer() {
           const file = planPath(url.searchParams.get('root'), url.searchParams.get('p'));
           if (!file) { json(400, { error: 'path' }); return; }
           if (req.method === 'GET') {
-            json(200, existsSync(file) ? { exists: true, text: readFileSync(file, 'utf8') } : { exists: false });
+            json(200, existsSync(file) ? { exists: true, text: readFileSync(file, 'utf8'), mtime: statSync(file).mtimeMs } : { exists: false });
             return;
           }
           if (req.method === 'PUT') {

@@ -1,11 +1,12 @@
 // 构建：读中英文模板和字段表，把核心、界面、样式、图标合成一个 web/shupian.js，并同步到浏览器扩展目录和 AI 说明。
 // 用法：node tools/build.mjs
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iconSvg } from './build-icons.mjs';
-import { usedKeys, dictKeys } from './i18n-keys.mjs';
+import { checkKeys } from './i18n-keys.mjs';
+import { T, locales } from './text.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (...p) => readFileSync(join(root, ...p), 'utf8');
@@ -20,14 +21,16 @@ function parseFieldTable(md) {
     if (/^##\s/.test(line)) { no = ''; return; }
     if (!no || line.charAt(0) !== '|') return;
     const cells = line.split('|').slice(1, -1).map((c) => c.trim());
-    if (cells.length < 3 || /^-+$/.test(cells[0]) || cells[0] === '字段' || cells[0] === 'Field') return;
-    (fields[no] = fields[no] || []).push({ name: cells[0], purpose: cells[1], how: cells[2] });
+    if (cells.length < 3 || /^-+$/.test(cells[0]) || Object.keys(locales).some((k) => locales[k].doc.fieldHeader === cells[0])) return;
+    const options = (cells[3] || '').split(/[、,，]\s*/).map((o) => o.trim()).filter(Boolean);
+    (fields[no] = fields[no] || []).push({ name: cells[0], purpose: cells[1], how: cells[2], options });
   });
   return fields;
 }
 
 // 中文示例就是这个项目自己的计划书，以根目录的计划书为准
-copyFileSync(join(root, '计划书.md'), join(root, 'templates', 'zh', 'example.md'));
+// 示例就是这个项目自己的计划书（中文那份）
+copyFileSync(join(root, locales.zh.doc.planFile), join(root, 'templates', 'zh', 'example.md'));
 
 const schema = {};
 ['zh', 'en'].forEach((lang) => {
@@ -39,12 +42,12 @@ const schema = {};
   };
 });
 
-// 界面里的每一句都要有英文词条
-const used = usedKeys();
-const have = dictKeys();
-const missing = used.filter((k) => !have.has(k));
-if (missing.length) {
-  console.error('构建失败：缺少英文词条：\n' + missing.join('\n'));
+// 文字和代码分离：键要齐全，不留没人用的键，代码里不许有中文字符串
+const keyCheck = checkKeys();
+if (keyCheck.missing.length || keyCheck.unused.length || keyCheck.text.length) {
+  if (keyCheck.missing.length) console.error(T('build_missing_keys') + '\n' + keyCheck.missing.join('\n'));
+  if (keyCheck.unused.length) console.error(T('build_unused_keys') + '\n' + keyCheck.unused.join('\n'));
+  if (keyCheck.text.length) console.error(T('build_text_in_code') + '\n' + keyCheck.text.join('\n'));
   process.exit(1);
 }
 
@@ -52,13 +55,13 @@ const core = read('src', 'core.js');
 const parts = [
   '(function () {',
   "'use strict';",
+  'const LOCALES = ' + JSON.stringify(locales) + ';',
   'const SCHEMA = ' + JSON.stringify(schema) + ';',
   'const CSS = ' + JSON.stringify(read('src', 'style.css')) + ';',
   'const ICON_SVG = ' + JSON.stringify(iconSvg()) + ';',
   'const Core = (function () { const module = { exports: {} };',
   core,
   'return module.exports; })();',
-  read('src', 'i18n-en.js'),
   read('src', 'ui-base.js'),
   read('src', 'ui-kit.js'),
   read('src', 'page-tools.js'),
@@ -78,7 +81,7 @@ const escapeRe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const banned = [/[A-Za-z]:\\Users\\/, /\/home\/[a-z0-9_-]+\//i].concat(privateWords.map((w) => new RegExp(escapeRe(w), 'i')));
 const hit = banned.filter((re) => re.test(bundle));
 if (hit.length) {
-  console.error('构建失败：发布物里出现不允许的内容：' + hit.map(String).join(' '));
+  console.error(T('build_banned', { what: hit.map(String).join(' ') }));
   process.exit(1);
 }
 
@@ -102,7 +105,9 @@ writeFileSync(join(ext, 'shupian.js'), bundle);
 });
 
 // AI 说明里带一份同步的模板副本
-['skill', join('skills', '薯片计划助手')].forEach((dir) => {
+// AI 说明目录：skill/，以及 skills/ 下带 references 的各个目录
+const skillDirs = ['skill'].concat(existsSync(join(root, 'skills')) ? readdirSync(join(root, 'skills')).map((n) => join('skills', n)) : []);
+skillDirs.forEach((dir) => {
   if (!existsSync(join(root, dir))) return;
   ['zh', 'en'].forEach((lang) => {
     const to = join(root, dir, 'references', lang);
@@ -112,4 +117,4 @@ writeFileSync(join(ext, 'shupian.js'), bundle);
 });
 
 console.log('built web/shupian.js ' + Math.round(bundle.length / 1024) + ' KB, hash ' + hash);
-console.log('terms: ' + used.length + '; field sections: zh ' + Object.keys(schema.zh.fields).join(',') + ' / en ' + Object.keys(schema.en.fields).join(','));
+console.log('keys: ' + keyCheck.used + '; field sections: zh ' + Object.keys(schema.zh.fields).join(',') + ' / en ' + Object.keys(schema.en.fields).join(','));

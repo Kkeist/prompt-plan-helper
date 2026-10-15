@@ -35,7 +35,7 @@ test('状态读写：中文和英文', () => {
 });
 
 test('有待补时不能通过，没有时可以', () => {
-  const dirty = timerZh.replace('怎么来到这个页面：一打开就是它', '怎么来到这个页面：');
+  const dirty = timerZh.replace('进入方式：一打开就是它', '进入方式：');
   const r = Core.markPassed(dirty);
   assert.equal(r.ok, false);
   assert.equal(r.pending, 1);
@@ -120,7 +120,7 @@ test('新增页面和功能：为空、重名被拒绝，成功后编号递增',
   assert.equal(Core.info(Core.split(r.md)[r.line]).body, '4.3 全新功能');
   const en = Core.addBlock(timerEn, 'page', 'About');
   assert.match(en.md, /### 3\.3 About/);
-  assert.match(en.md, /What this page is for:/);
+  assert.match(en.md, /Page purpose:/);
 });
 
 test('改名：重名被拒绝，保留编号', () => {
@@ -141,7 +141,7 @@ test('块正文读写：只换这一块，别处不动', () => {
   const lines = Core.split(timerZh);
   const i = lines.findIndex((l) => /^### 4\.1\b/.test(l));
   const before = Core.bodyText(lines, i);
-  assert.match(before, /它做什么：按设定的分钟数倒计时/);
+  assert.match(before, /功能说明：按设定的分钟数倒计时/);
   const md = Core.setBody(timerZh, i, before.replace('结束时提醒', '结束时响铃'));
   assert.match(md, /结束时响铃/);
   assert.equal(Core.structure(md).features.length, 2);
@@ -154,11 +154,11 @@ test('空白计划书：中文和英文都没有说明行，带状态，字段�
   assert.match(zh, /状态：草稿　　更新：2026-01-02/);
   assert.ok(!/最初的描述/.test(zh));
   assert.ok(Core.countPending(zh) > 10);
-  assert.match(Core.normalizeForExport(zh), /这是什么：待补：缺这是什么/);
+  assert.match(Core.normalizeForExport(zh), /项目描述：待补：缺项目描述/);
   const en = Core.blankPlan(tplEn, 'Demo', '2026-01-02');
   assert.match(en, /^# Plan: Demo/m);
   assert.match(en, /Status: Draft　　Updated: 2026-01-02/);
-  assert.match(Core.normalizeForExport(en), /What it is: TBD: missing What it is/);
+  assert.match(Core.normalizeForExport(en), /Description: TBD: missing Description/);
 });
 
 test('空白计划书加用法、加页面后仍能结构化', () => {
@@ -219,4 +219,43 @@ test('问题：一次加多条，分散在不同功能，顺序和行号都对',
   assert.deepEqual(after[0].items.map((x) => x.text.replace(/（.*）$/, '')), ['第一个功能的问题甲', '第一个功能的问题乙']);
   assert.deepEqual(after[1].items.map((x) => x.text.replace(/（.*）$/, '')), ['第二个功能的问题']);
   assert.equal(Core.addIssues(timerZh, [{ featureLine: feats[0].featureLine, text: '' }], '2026-01-05').ok, false);
+});
+
+test('三方合并：不同位置都保留，同一位置按先后', () => {
+  const base = 'a\nb\nc\nd';
+  const r1 = Core.merge3(base, 'a\nB\nc\nd', 'a\nb\nc\nD', 'theirs');
+  assert.equal(r1.text, 'a\nB\nc\nD');
+  assert.equal(r1.conflicts, 0);
+  const r2 = Core.merge3(base, 'a\nX\nc\nd', 'a\nY\nc\nd', 'theirs');
+  assert.equal(r2.text, 'a\nY\nc\nd');
+  assert.equal(r2.conflicts, 1);
+  assert.equal(Core.merge3(base, 'a\nX\nc\nd', 'a\nY\nc\nd', 'mine').text, 'a\nX\nc\nd');
+  // 一边新增、一边在别处修改
+  const r3 = Core.merge3(base, 'a\nb\nc\nd\ne', 'z\nb\nc\nd', 'mine');
+  assert.equal(r3.text, 'z\nb\nc\nd\ne');
+  // 一边没动
+  assert.equal(Core.merge3(base, base, 'a\nb', 'mine').text, 'a\nb');
+  assert.equal(Core.merge3(base, 'a', base, 'mine').text, 'a');
+  // 两边改成一样
+  assert.equal(Core.merge3(base, 'a\nq\nc\nd', 'a\nq\nc\nd', 'mine').conflicts, 0);
+});
+
+test('问题的三种状态：待处理、处理中、已修', () => {
+  const f = Core.issueList(timerZh)[0];
+  const r = Core.addIssue(timerZh, f.featureLine, '点暂停后数字仍在走', '2026-01-02');
+  const line = Core.issueList(r.md)[0].items[0].line;
+  assert.equal(Core.issueList(r.md)[0].items[0].state, 'todo');
+  const doing = Core.setIssueState(r.md, line, 'doing');
+  assert.match(doing, /- 处理中：点暂停后数字仍在走/);
+  assert.equal(Core.issueList(doing)[0].items[0].state, 'doing');
+  assert.equal(Core.issueList(doing)[0].items[0].text, '点暂停后数字仍在走（2026-01-02）');
+  const done = Core.setIssueState(doing, line, 'done');
+  assert.match(done, /- 已修：点暂停后数字仍在走/);
+  assert.doesNotMatch(done, /处理中：/);
+  assert.equal(Core.issueList(done)[0].items[0].done, true);
+  assert.equal(Core.issueList(Core.setIssueState(done, line, 'todo'))[0].items[0].state, 'todo');
+  assert.equal(Core.nextIssueState('todo'), 'doing');
+  assert.equal(Core.nextIssueState('done'), 'todo');
+  const en = Core.addIssue(timerEn, Core.issueList(timerEn)[0].featureLine, 'Stuck', '2026-01-02');
+  assert.match(Core.setIssueState(en.md, Core.issueList(en.md)[0].items[0].line, 'doing'), /- Working: Stuck/);
 });

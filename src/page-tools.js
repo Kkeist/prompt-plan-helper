@@ -19,11 +19,11 @@ function installErrorHook() {
   if (errorHookOn) return;
   errorHookOn = true;
   window.addEventListener('error', (e) => {
-    pushError((e.message || '脚本错误') + (e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : ''));
+    pushError((e.message || t('script_error')) + (e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : ''));
   });
   window.addEventListener('unhandledrejection', (e) => {
     const r = e.reason;
-    pushError('未处理的 Promise 错误：' + (r && r.message ? r.message : r));
+    pushError(t('unhandled_promise_error') + (r && r.message ? r.message : r));
   });
   const orig = console.error;
   console.error = function () {
@@ -113,7 +113,7 @@ async function domShot() {
   canvas.getContext('2d').drawImage(img, 0, 0, w, hh);
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.85));
   if (!blob) throw new Error('encode');
-  return { blob, kind: '伪截图' };
+  return { blob, kind: 'simulated' };
 }
 
 // 扩展里有浏览器自己的截图能力时优先用它
@@ -123,7 +123,7 @@ function realShot() {
     try {
       chrome.runtime.sendMessage({ shupian: 'capture' }, (res) => {
         if (chrome.runtime.lastError || !res || !res.dataUrl) { resolve(null); return; }
-        fetch(res.dataUrl).then((r) => r.blob()).then((blob) => resolve({ blob, kind: '截图' }), () => resolve(null));
+        fetch(res.dataUrl).then((r) => r.blob()).then((blob) => resolve({ blob, kind: 'real' }), () => resolve(null));
       });
     } catch (e) {
       resolve(null);
@@ -152,7 +152,7 @@ function elementInfo(el) {
   const styles = props.map((p) => p + ' ' + cs.getPropertyValue(p)).concat(['width ' + Math.round(r.width) + 'px', 'height ' + Math.round(r.height) + 'px']).join('；');
   const text = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40);
   return {
-    path: elementPath(el) + (text ? '（文字「' + text + '」）' : ''),
+    path: elementPath(el) + (text ? t('element_text', { text }) : ''),
     styles,
   };
 }
@@ -164,7 +164,7 @@ function pickElement(shadowRoot) {
     box.setAttribute('style', 'position:fixed;z-index:2147483646;pointer-events:none;border:2px solid #e5322d;background:rgba(229,50,45,0.12);display:none');
     const tip = document.createElement('div');
     tip.setAttribute('style', 'position:fixed;z-index:2147483646;pointer-events:none;left:8px;top:8px;background:#000;color:#fff;font:13px/1.5 sans-serif;padding:4px 8px;border-radius:6px;max-width:calc(100vw - 16px);overflow-wrap:anywhere');
-    tip.textContent = t('点击要选取的元素，按 Esc 取消。');
+    tip.textContent = t('click_the_element_to_pick_press_esc_to');
     shadowRoot.append(box, tip);
     let cur = null;
     const done = (v) => {
@@ -235,7 +235,7 @@ function pickRegion(shadowRoot) {
     box.setAttribute('style', 'position:fixed;border:2px solid #e5322d;background:rgba(255,255,255,0.15);display:none;pointer-events:none');
     const tip = document.createElement('div');
     tip.setAttribute('style', 'position:fixed;left:8px;top:8px;background:#000;color:#fff;font:13px/1.5 sans-serif;padding:4px 8px;border-radius:6px;pointer-events:none');
-    tip.textContent = t('拖动选择截图区域，按 Esc 取消。');
+    tip.textContent = t('drag_to_select_the_area_press_esc_to_cancel');
     shadowRoot.append(layer, box, tip);
     let sx = 0;
     let sy = 0;

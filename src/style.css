@@ -54,6 +54,8 @@
 .win .app { font-size: inherit; height: auto; }
 .fb-body { padding: 0.5em 0.8em 0.7em; }
 .fb-body .row { margin-top: 0.4em; }
+.collapse { display: inline-flex; align-items: center; cursor: grab; touch-action: none; }
+.collapse .logo { width: 1.7em; height: 1.7em; margin: 0; }
 .fb-body textarea.in { margin-top: 0.5em; }
 .chipline img.shot { width: 3.2em; height: 2.2em; object-fit: cover; border-radius: 0.3em; margin-right: 0.5em; flex: none; }
 @media (max-width: 400px) { .win { font-size: 14px; } }
@@ -202,8 +204,6 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 
 .mask { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: var(--z-modal); background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; padding: 0.8em; }
 .modal { display: flex; flex-direction: column; width: 100%; max-width: 38em; max-height: 100%; background: var(--paper); border: 2px solid var(--ink); border-radius: 0.7em; }
-.modal-head { flex: none; display: flex; align-items: center; padding: 0.4em 0.4em 0.4em 0.9em; border-bottom: 1px solid var(--line); }
-.modal-head h2 { flex: 1; margin: 0; font-size: 1.05em; }
 .modal-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.8em 0.9em; }
 .modal-foot { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; padding: 0.6em 0.4em 0.1em 0.9em; border-top: 1px solid var(--line); background: var(--paper); }
 .modal-foot > * { margin: 0 0.5em 0.5em 0; }
@@ -240,7 +240,9 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 
 /* 文件夹列表 */
 .folders .ftitle { margin: 1em 0 0.3em; font-size: 0.95em; }
-.frow { display: flex; align-items: flex-start; border: 1px solid var(--line); border-radius: 0.6em; padding: 0.5em 0.6em; margin: 0.4em 0; }
+.frow { display: flex; align-items: flex-start; border: 1px solid var(--line); border-radius: 0.6em; padding: 0.5em 0.6em; margin: 0.4em 0; cursor: pointer; }
+.frow:hover { background: var(--soft); }
+.frow:focus-visible { border-color: var(--ink); }
 .frow.cur { border-color: var(--ink); }
 .finfo { flex: 1; min-width: 0; }
 .fname { font-weight: 700; overflow-wrap: anywhere; }
@@ -273,7 +275,30 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .status-head .btn { margin-left: auto; }
 .issue { display: flex; align-items: flex-start; margin: 0.2em 0 0.2em 1.2em; padding: 0.25em 0.5em; background: var(--soft); border-radius: 0.5em; }
 .issue-text { flex: 1; min-width: 0; margin: 0 0.5em; overflow-wrap: anywhere; }
-.queue .issue { margin-left: 0; margin-bottom: 0.4em; }
+.issue-text.link { text-align: left; text-decoration: none; }
+.issue textarea.in { flex: 1; margin: 0 0.5em; }
+.istate { flex: none; min-width: 4.4em; }
+.istate.doing { font-weight: 700; border-width: 2px; }
+.istate.done { background: var(--ink); color: var(--paper); }
+.issue.done .issue-text { color: var(--muted); text-decoration: line-through; }
+.issue.doing { border-left: 3px solid var(--ink); }
+.issue.flash { animation: issue-done 1.4s ease-out 1; }
+@keyframes issue-done { from { background: var(--ink); } to { background: var(--soft); } }
+@media (prefers-reduced-motion: reduce) { .issue.flash { animation: none; } }
+.ilist .irow { margin: 0 0 0.5em; }
+.irow-top { display: flex; flex-wrap: wrap; align-items: center; margin-bottom: 0.2em; }
+.irow-top > * { margin-right: 0.35em; }
+.ftag { display: inline-flex; align-items: center; }
+.ftag .x { width: 1.6em; height: 1.6em; }
+.irow-top:empty { display: none; }
+.irow-top .sp { flex: 1; }
+.add-row { margin-bottom: 0.3em; }
+.optrows { margin-bottom: 0.5em; }
+.optrow { display: flex; flex-wrap: wrap; align-items: center; margin-bottom: 0.3em; }
+.optrow .lb { margin-right: 0.5em; }
+.optrow .chip { margin: 0 0.35em 0.3em 0; }
+.doc h2.stage { margin: 1.6em 0 0; font-size: 1.1em; line-height: 1.4; color: var(--muted); }
+.doc h2.stage + .sec { margin-top: 0.4em; }
 .status-row .btn.sm { flex: none; margin-left: 0.5em; }
 .target { max-width: 100%; text-align: left; overflow-wrap: anywhere; }
 

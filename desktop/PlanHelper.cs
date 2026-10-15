@@ -45,6 +45,89 @@ static class Program
     }
 }
 
+// 语言文件（locales/*.json）嵌在 exe 里：菜单文字和计划书格式里的固定词都从这里取，代码里不写任何一种语言的原文。
+static class Vocab
+{
+    static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+    // 按语言代号排序，和命令行、网页里的顺序一致
+    public static readonly SortedDictionary<string, Dictionary<string, object>> Locales = Load();
+
+    static SortedDictionary<string, Dictionary<string, object>> Load()
+    {
+        var all = new SortedDictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
+        var asm = Assembly.GetExecutingAssembly();
+        foreach (var name in asm.GetManifestResourceNames())
+        {
+            if (!name.StartsWith("locale/") || !name.EndsWith(".json")) continue;
+            using (var s = asm.GetManifestResourceStream(name))
+            using (var r = new StreamReader(s, Encoding.UTF8))
+                all[name.Substring(7, name.Length - 12)] = (Dictionary<string, object>)Json.DeserializeObject(r.ReadToEnd());
+        }
+        return all;
+    }
+
+    // 当前系统界面语言；没有对应的语言文件就用 en
+    public static string Lang
+    {
+        get
+        {
+            var l = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+            return Locales.ContainsKey(l) ? l : "en";
+        }
+    }
+
+    static Dictionary<string, object> Part(string lang, string part)
+    {
+        return (Dictionary<string, object>)Locales[lang][part];
+    }
+
+    // 桌面版自己的文字
+    public static string Text(string key)
+    {
+        return Convert.ToString(Part(Lang, "exe")[key]);
+    }
+
+    // 每种语言里页面标题的文字，用来找已经打开的小窗口
+    public static string[] Titles()
+    {
+        return Locales.Keys.Select(k => Convert.ToString(Part(k, "ui")["prompt_plan_helper"])).ToArray();
+    }
+
+    public static IEnumerable<Dictionary<string, object>> Docs
+    {
+        get { return Locales.Keys.Select(k => Part(k, "doc")); }
+    }
+
+    public static string Word(Dictionary<string, object> doc, string key)
+    {
+        return Convert.ToString(doc[key]);
+    }
+
+    public static string Sub(Dictionary<string, object> doc, string group, string key)
+    {
+        return Convert.ToString(((Dictionary<string, object>)doc[group])[key]);
+    }
+
+    // 一组词：doc[key] 本身是数组
+    public static IEnumerable<string> Items(Dictionary<string, object> doc, string key)
+    {
+        var o = doc[key] as System.Collections.IEnumerable;
+        return o.Cast<object>().Select(Convert.ToString);
+    }
+
+    public static IEnumerable<string> List(Dictionary<string, object> doc, string group, string key)
+    {
+        var o = ((Dictionary<string, object>)doc[group])[key] as System.Collections.IEnumerable;
+        return o.Cast<object>().Select(Convert.ToString);
+    }
+
+    // 各语言里同一个意思的词，拼成正则里的「或」
+    public static string Alt(Func<Dictionary<string, object>, IEnumerable<string>> pick)
+    {
+        return "(?:" + string.Join("|", Docs.SelectMany(pick).Select(Regex.Escape)) + ")";
+    }
+}
+
 static class WinApi
 {
     delegate bool EnumProc(IntPtr h, IntPtr l);
@@ -117,7 +200,6 @@ class HotkeyWindow : NativeWindow, IDisposable
 
 class Host : ApplicationContext
 {
-    readonly bool zh = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "zh";
     readonly NotifyIcon tray = new NotifyIcon();
     readonly HotkeyWindow hotkey = new HotkeyWindow();
     readonly Server server = new Server();
@@ -143,18 +225,16 @@ class Host : ApplicationContext
         hotkey.Pressed += OpenHub;
 
         var menu = new ContextMenuStrip();
-        var show = menu.Items.Add(zh ? "显示窗口" : "Show window", null, delegate { OpenHub(); });
+        var show = menu.Items.Add(Vocab.Text("show_window"), null, delegate { OpenHub(); });
         show.Font = new Font(show.Font, FontStyle.Bold);
-        menu.Items.Add(zh ? "退出" : "Exit", null, delegate { ExitThread(); });
+        menu.Items.Add(Vocab.Text("exit"), null, delegate { ExitThread(); });
         tray.Icon = Server.AppIcon();
-        tray.Text = zh ? "prompt 计划书助手" : "Prompt plan helper";
+        tray.Text = Vocab.Titles()[Array.IndexOf(Vocab.Locales.Keys.ToArray(), Vocab.Lang)];
         tray.ContextMenuStrip = menu;
         tray.Visible = true;
         tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) OpenHub(); };
         tray.BalloonTipTitle = tray.Text;
-        tray.BalloonTipText = hotkey.Registered
-            ? (zh ? "已在托盘运行，按 Ctrl+Alt+S 打开。" : "Running in the tray. Press Ctrl+Alt+S to open.")
-            : (zh ? "已在托盘运行。快捷键 Ctrl+Alt+S 被占用，请点击托盘图标打开。" : "Running in the tray. Ctrl+Alt+S is taken; click the tray icon to open.");
+        tray.BalloonTipText = hotkey.Registered ? Vocab.Text("tray_running") : Vocab.Text("tray_hotkey_taken");
         tray.ShowBalloonTip(4000);
         PromoteTray();
         // 自己启动时直接打开小窗口；自测时不弹
@@ -176,7 +256,7 @@ class Host : ApplicationContext
             timer.Dispose();
             if (state == 0)
             {
-                tray.BalloonTipText = zh ? "托盘图标在任务栏右下角「^」里，可以拖到任务栏上固定显示。" : "The tray icon is under the ^ at the right of the taskbar. Drag it onto the taskbar to keep it visible.";
+                tray.BalloonTipText = Vocab.Text("tray_hidden");
                 tray.ShowBalloonTip(6000);
             }
         };
@@ -214,7 +294,7 @@ class Host : ApplicationContext
 
     void OpenHub()
     {
-        var existing = WinApi.FindWindow(new[] { "prompt 计划书助手", "Prompt plan helper" });
+        var existing = WinApi.FindWindow(Vocab.Titles());
         if (existing != IntPtr.Zero)
         {
             WinApi.Raise(existing);
@@ -243,9 +323,21 @@ class Host : ApplicationContext
 class Server
 {
     static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
-    static readonly string[] PlanNames = { "plan.md", "计划书.md" };
-    // 计划书文件：plan.md、计划书.md，以及同一个文件夹里的多份：plan-名称.md、计划书-名称.md
-    static readonly Regex PlanFileRe = new Regex("^(?:plan|计划书)(?:-[^\\\\/:*?\"<>|]{1,60})?\\.md$", RegexOptions.IgnoreCase);
+    // 计划书文件：默认的名字，以及同一个文件夹里的多份（前缀加名称）；名字都来自语言文件
+    static readonly string[] PlanNames = Vocab.Docs.Select(d => Vocab.Word(d, "planFile")).ToArray();
+    static readonly Regex PlanFileRe = new Regex("^(?:" + string.Join("|", PlanNames.Select(n => Regex.Escape(Path.GetFileNameWithoutExtension(n)))) + ")(?:-[^\\\\/:*?\"<>|]{1,60})?\\.md$", RegexOptions.IgnoreCase);
+    static readonly string Seps = "[：:]";
+    static readonly string TbdAlt = Vocab.Alt(d => new[] { Vocab.Word(d, "tbd") });
+    static readonly Regex ProgressLabelRe = new Regex("^" + Vocab.Alt(d => Vocab.List(d, "labels", "progress")) + Seps + "\\s*(.*)$", RegexOptions.IgnoreCase);
+    static readonly Regex DoneRe = new Regex("^" + Vocab.Alt(d => new[] { Vocab.Sub(d, "progress", "done") }), RegexOptions.IgnoreCase);
+    static readonly Regex DoingRe = new Regex("^" + Vocab.Alt(d => new[] { Vocab.Sub(d, "progress", "doing") }), RegexOptions.IgnoreCase);
+    static readonly Regex TitleRe = new Regex("^#\\s+(?:" + Vocab.Alt(d => new[] { Vocab.Word(d, "title") }.Concat(Vocab.Items(d, "titleAlt"))) + Seps + "\\s*)?(.*)$");
+    static readonly Regex StatusLineRe = new Regex("^" + Vocab.Alt(d => new[] { Vocab.Word(d, "status") }) + Seps + "\\s*(.*?)(?:　+|\\s{2,}|$)");
+    static readonly Regex QuotedTbdRe = new Regex("[「\"“]" + TbdAlt + "[^」\"”]*[」\"”]");
+    static readonly Regex TbdMarkRe = new Regex(TbdAlt + Seps);
+    static readonly Regex ApprovedNoteRe = new Regex("^" + Vocab.Alt(d => new[] { Vocab.Sub(d, "states", "approved") }) + "\\s*(?:=|is)", RegexOptions.IgnoreCase);
+    static readonly Regex NotAFieldRe = new Regex("^(?:" + TbdAlt.Substring(3, TbdAlt.Length - 4) + "|" + Vocab.Alt(d => Vocab.List(d, "labels", "issues")) + ")$", RegexOptions.IgnoreCase);
+    static Regex StateRe(string code) { return new Regex("^" + Vocab.Alt(d => new[] { Vocab.Sub(d, "states", code) }) + "$", RegexOptions.IgnoreCase); }
     readonly string home = Environment.GetEnvironmentVariable("USERPROFILE") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     readonly HashSet<string> connected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     // 拖入的文件夹按名字找到的候选，用户已经明确要打开它，可以连接
@@ -477,7 +569,7 @@ class Server
             if (file == null) { SendJson(ctx, 400, new { error = "path" }); return; }
             if (ctx.Request.HttpMethod == "GET")
             {
-                if (File.Exists(file)) SendJson(ctx, 200, new { exists = true, text = File.ReadAllText(file, Encoding.UTF8) });
+                if (File.Exists(file)) SendJson(ctx, 200, new { exists = true, text = File.ReadAllText(file, Encoding.UTF8), mtime = ToMs(File.GetLastWriteTime(file)) });
                 else SendJson(ctx, 200, new { exists = false });
                 return;
             }
@@ -771,18 +863,18 @@ class Server
             }
             if (inFeature)
             {
-                var pm = Regex.Match(l.Trim(), @"^(?:进度|Progress)[：:]\s*(.*)$", RegexOptions.IgnoreCase);
+                var pm = ProgressLabelRe.Match(l.Trim());
                 if (pm.Success)
                 {
                     var v = pm.Groups[1].Value.Trim();
-                    if (Regex.IsMatch(v, @"^(?:已完成|Done)", RegexOptions.IgnoreCase)) progress = "done";
-                    else if (Regex.IsMatch(v, @"^(?:进行中|In progress)", RegexOptions.IgnoreCase)) progress = "doing";
+                    if (DoneRe.IsMatch(v)) progress = "done";
+                    else if (DoingRe.IsMatch(v)) progress = "doing";
                     else progress = "todo";
                 }
             }
         }
         flush();
-        var tm = Regex.Match(string.Join("\n", lines.Where(x => Regex.IsMatch(x, @"^#\s+"))).Split('\n').FirstOrDefault() ?? "", @"^#\s+(?:(?:计划书|修改单|Plan|Change)[：:]\s*)?(.*)$");
+        var tm = TitleRe.Match(string.Join("\n", lines.Where(x => Regex.IsMatch(x, @"^#\s+"))).Split('\n').FirstOrDefault() ?? "");
         var title = tm.Success ? tm.Groups[1].Value.Trim() : "";
         if (Regex.IsMatch(title, "〈[^〉]*〉")) title = "";
         return new Dictionary<string, object>
@@ -803,12 +895,11 @@ class Server
     {
         foreach (var l in lines.Take(14))
         {
-            var m = Regex.Match(l, @"^(?:状态|Status)[：:]\s*(.*?)(?:　+|\s{2,}|$)");
+            var m = StatusLineRe.Match(l);
             if (!m.Success) continue;
             var w = m.Groups[1].Value.Trim();
-            if (Regex.IsMatch(w, "^(?:草稿|draft)$", RegexOptions.IgnoreCase)) return "draft";
-            if (Regex.IsMatch(w, "^(?:整理中|in progress)$", RegexOptions.IgnoreCase)) return "doing";
-            if (Regex.IsMatch(w, "^(?:已通过|approved)$", RegexOptions.IgnoreCase)) return "approved";
+            foreach (var code in new[] { "draft", "doing", "approved" })
+                if (StateRe(code).IsMatch(w)) return code;
         }
         return "";
     }
@@ -817,20 +908,19 @@ class Server
     {
         var footer = FooterStart(lines);
         var count = 0;
-        var quoted = new Regex("[「\"“](?:待补|TBD)[^」\"”]*[」\"”]");
-        for (var i = 0; i < footer; i++)
+                for (var i = 0; i < footer; i++)
         {
             var text = lines[i];
             var trimmed = text.Trim();
-            if (trimmed == "" || Regex.IsMatch(trimmed, @"^(?:已通过|Approved)\s*(?:=|is)")) continue;
-            var t = quoted.Replace(text, "");
-            count += Regex.Matches(t, @"(?:待补|TBD)[：:]").Count;
+            if (trimmed == "" || ApprovedNoteRe.IsMatch(trimmed)) continue;
+            var t = QuotedTbdRe.Replace(text, "");
+            count += TbdMarkRe.Matches(t).Count;
             count += Regex.Matches(t, "〈[^〉]*〉").Count;
             if (Regex.IsMatch(trimmed, @"^#{1,6}\s")) continue;
             var bullet = Regex.IsMatch(text, @"^\s*(?:[-*+]|\d+[.)])\s+");
             var body = bullet ? Regex.Replace(text, @"^\s*(?:[-*+]|\d+[.)])\s+", "") : trimmed;
             var lv = Regex.Match(body, @"^([^：:。，；]{1,40}?)(?:：|:\s|:$)\s*(.*)$");
-            if (lv.Success && lv.Groups[2].Value.Trim() == "" && !Regex.IsMatch(lv.Groups[1].Value.Trim(), @"^(?:待补|TBD|问题|Issues)$", RegexOptions.IgnoreCase))
+            if (lv.Success && lv.Groups[2].Value.Trim() == "" && !NotAFieldRe.IsMatch(lv.Groups[1].Value.Trim()))
             {
                 var next = i + 1;
                 while (next < footer && lines[next].Trim() == "") next++;

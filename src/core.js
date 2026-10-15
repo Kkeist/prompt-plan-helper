@@ -6,40 +6,53 @@
 const SEC = { what: '1', flows: '2', pages: '3', features: '4', data: '5', look: '6', rules: '7' };
 const LAST_FILLED = 7;
 
-const TBD_RE = /(?:待补|TBD)[：:]/g;
-const TBD_QUOTED_RE = /[「"“](?:待补|TBD)[^」"”]*[」"”]/g;
+// 计划书格式里的固定词（标签、状态、提示词模板）都在 locales/<语言>.json 的 doc 部分，代码里不写任何一种语言的原文。
+// 浏览器里由构建注入 LOCALES；命令行和本机服务里直接读文件。
+const LOC = typeof LOCALES !== 'undefined' ? LOCALES : { zh: require('../locales/zh.json'), en: require('../locales/en.json') };
+const DOC_LANGS = Object.keys(LOC).filter((k) => LOC[k].doc);
+const DOCS = DOC_LANGS.map((k) => LOC[k].doc);
+
+const reEsc = (w) => String(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// 各语言里同一个意思的词：返回正则可用的「或」片段
+const alt = (pick) => '(?:' + DOCS.reduce((all, d) => all.concat(pick(d)), []).map(reEsc).join('|') + ')';
+
+// 兼容的写法：也认命令行和程序内部用的英文代号
+const WORDS = {};
+DOC_LANGS.forEach((k) => {
+  const d = LOC[k].doc;
+  WORDS[k] = {
+    title: d.title, status: d.status, updated: d.updated, tbd: d.tbd, missing: d.missing, sep: d.sep,
+    states: d.states, progress: d.progress,
+    page: { fields: d.pageFields },
+    feature: { fields: d.featureFields, progressLabel: d.progressLabel },
+    newFlow: d.newFlow,
+  };
+});
+
+const SEPS = '[：:]';
+const TBD_RE = new RegExp(alt((d) => [d.tbd]) + SEPS, 'g');
+const TBD_QUOTED_RE = new RegExp('[「"“]' + alt((d) => [d.tbd]) + '[^」"”]*[」"”]', 'g');
+const TBD_LABEL_RE = new RegExp('^' + alt((d) => [d.tbd]) + '$', 'i');
+const TBD_START_RE = new RegExp('^' + alt((d) => [d.tbd]));
+const TBD_ALT = alt((d) => [d.tbd]).slice(3, -1);
 const PLACEHOLDER_RE = /〈[^〉]*〉/g;
 const INSTRUCTION_LINE_RE = /^〈[^〉]*〉$/;
 
-const WORDS = {
-  zh: {
-    title: '计划书', status: '状态', updated: '更新', tbd: '待补', missing: '缺',
-    states: { draft: '草稿', doing: '整理中', approved: '已通过' },
-    progress: { label: '进度', todo: '未做', doing: '进行中', done: '已完成' },
-    page: { fields: ['这个页面是干什么的：', '页面上有什么：', '怎么来到这个页面：'] },
-    feature: { fields: ['它做什么：', '怎么才算做好：', '有什么限制：'], progressLabel: '进度：' },
-    newFlow: '〈名字〉：待补：用户做什么 → 看到什么',
-  },
-  en: {
-    title: 'Plan', status: 'Status', updated: 'Updated', tbd: 'TBD', missing: 'missing ',
-    states: { draft: 'Draft', doing: 'In progress', approved: 'Approved' },
-    progress: { label: 'Progress', todo: 'Not started', doing: 'In progress', done: 'Done' },
-    page: { fields: ['What this page is for:', 'What is on the page:', 'How the user gets here:'] },
-    feature: { fields: ['What it does:', 'Done when:', 'Limits:'], progressLabel: 'Progress:' },
-    newFlow: '〈Name〉: TBD: what the user does → what they see',
-  },
-};
+const PARTS_RE = new RegExp('^' + alt((d) => d.labels.parts) + '$', 'i');
+const CASES_RE = new RegExp('^' + alt((d) => d.labels.cases) + '$', 'i');
+const WHAT_RE = new RegExp('^' + alt((d) => d.labels.what) + '$', 'i');
+const PROGRESS_LABEL_RE = new RegExp('^' + alt((d) => d.labels.progress) + '$', 'i');
+const ISSUES_RE = new RegExp('^' + alt((d) => d.labels.issues) + '$', 'i');
+const STATE_WORDS = ['draft', 'doing', 'approved'].map((code) => [new RegExp('^' + alt((d) => [d.states[code]]) + '$', 'i'), code]);
+const STATUS_WORD_RE = new RegExp('^' + alt((d) => [d.status]) + SEPS);
+const APPROVED_NOTE_RE = new RegExp('^' + alt((d) => [d.states.approved]) + '\\s*(?:=|is)', 'i');
+const ORIGINAL_RE = new RegExp('^' + alt((d) => [d.originalDescription]));
 
-const PARTS_RE = /^(?:页面上有什么|What is on the page|界面上有什么|What is on the screen|页面里有什么|部件|Parts?)$/i;
-const CASES_RE = /^(?:怎么才算做好|Done when|用例|Use cases?)$/i;
-const WHAT_RE = /^(?:它做什么|做什么|What it does|一句话)$/i;
-const PROGRESS_LABEL_RE = /^(?:进度|Progress)$/i;
-const ISSUES_RE = /^(?:问题|Issues)$/i;
-const STATE_WORDS = [
-  [/^(?:草稿|draft)$/i, 'draft'],
-  [/^(?:整理中|in progress)$/i, 'doing'],
-  [/^(?:已通过|approved)$/i, 'approved'],
-];
+// 默认的计划书文件名：plan.md、计划书.md；同一个文件夹里的多份是 前缀+名称.md
+const PLAN_NAMES = DOCS.map((d) => d.planFile);
+const FILE_PREFIXES = DOCS.map((d) => d.filePrefix);
+// 文件名：plan.md、计划书.md，或同一个文件夹里的 plan-名称.md、计划书-名称.md
+const PLAN_FILE_RE = new RegExp('^(?:' + DOCS.map((d) => reEsc(d.planFile.replace(/\.md$/, ''))).join('|') + ')(?:-[^\\\\/:*?"<>|]{1,60})?\\.md$', 'i');
 
 function split(md) {
   return String(md || '').replace(/\r\n?/g, '\n').split('\n');
@@ -65,7 +78,7 @@ function splitLabel(body) {
   const m = /^([^：:。，；]{1,40}?)(?:：|:\s|:$)\s*(.*)$/.exec(body);
   if (!m) return null;
   const label = m[1].trim();
-  if (/^(?:待补|TBD)$/i.test(label)) return null;
+  if (TBD_LABEL_RE.test(label)) return null;
   return { label, value: m[2] };
 }
 
@@ -86,9 +99,12 @@ function timeStamp(d) {
 // 文档用的是哪种语言：看状态行和标题，再看有没有汉字
 function docLang(md) {
   const head = split(md).slice(0, 12).join('\n');
-  if (/^状态[：:]|^#\s+(?:计划书|修改单)/m.test(head)) return 'zh';
-  if (/^Status:|^#\s+(?:Plan|Change):/m.test(head)) return 'en';
-  return /[一-鿿]/.test(md) ? 'zh' : 'en';
+  for (const k of DOC_LANGS) {
+    const d = LOC[k].doc;
+    const re = new RegExp('^' + reEsc(d.status) + SEPS + '|^#\\s+(?:' + [d.title].concat(d.titleAlt || []).map(reEsc).join('|') + ')' + SEPS, 'm');
+    if (re.test(head)) return k;
+  }
+  return /[\u4e00-\u9fff]/.test(md) ? 'zh' : 'en';
 }
 
 function footerStart(lines) {
@@ -215,7 +231,7 @@ function pendingList(md) {
     if (i >= end) return;
     const t = info(text);
     if (t.kind === 'blank' || t.kind === 'hr') return;
-    if (/^(?:已通过|Approved)\s*(?:=|is)/.test(text.trim())) return;
+    if (APPROVED_NOTE_RE.test(text.trim())) return;
     let n = pendingCount(text);
     if (isEmptyField(lines, i)) n += 1;
     if (t.kind === 'h' && t.level === 2) {
@@ -239,7 +255,8 @@ function countPending(md) {
 
 // ---------- 状态 ----------
 
-const STATUS_LINE_RE = /^(状态|Status)([：:]\s*)(.*?)((?:　+|\s{2,})(?:更新|Updated)[：:].*)?$/;
+const STATUS_LINE_RE = new RegExp('^(' + alt((d) => [d.status]) + ')(' + SEPS + '\\s*)(.*?)((?:　+|\\s{2,})' + alt((d) => [d.updated]) + SEPS + '.*)?$');
+const UPDATED_TAIL_RE = new RegExp('(' + alt((d) => [d.updated]) + SEPS + '\\s*).*$');
 
 function stateCode(word) {
   const w = String(word || '').trim();
@@ -268,7 +285,7 @@ function setStatus(md, code, date) {
     const m = STATUS_LINE_RE.exec(lines[i]);
     if (m) {
       let tail = m[4] || '';
-      if (tail) tail = tail.replace(/((?:更新|Updated)[：:]\s*).*$/, '$1' + (date || today()));
+      if (tail) tail = tail.replace(UPDATED_TAIL_RE, '$1' + (date || today()));
       lines[i] = m[1] + m[2] + statusLabel(code, lang) + tail;
       return join(lines);
     }
@@ -284,7 +301,7 @@ function markPassed(md, date) {
 
 // ---------- 名称与位置 ----------
 
-const TITLE_RE = /^#\s+(?:(?:计划书|修改单|Plan|Change)[：:]\s*)?(.*)$/;
+const TITLE_RE = new RegExp('^#\\s+(?:' + alt((d) => [d.title].concat(d.titleAlt || [])) + SEPS + '\\s*)?(.*)$');
 
 function titleName(md) {
   const t = split(md).find((l) => /^#\s+/.test(l));
@@ -298,8 +315,8 @@ function setTitle(md, name) {
   const lines = split(md);
   const lang = docLang(md);
   const i = lines.findIndex((l) => /^#\s+/.test(l));
-  const v = String(name || '').trim() || (lang === 'zh' ? '〈项目名〉' : '〈Project name〉');
-  const sep = lang === 'zh' ? '：' : ': ';
+  const v = String(name || '').trim() || LOC[lang].doc.projectName;
+  const sep = WORDS[lang].sep;
   if (i < 0) return '# ' + WORDS[lang].title + sep + v + '\n\n' + md;
   lines[i] = '# ' + WORDS[lang].title + sep + v;
   return join(lines);
@@ -382,14 +399,98 @@ function structure(md) {
   return { pages, features, widgets, cases };
 }
 
+// ---------- 三方合并 ----------
+
+// a 和 b 里按顺序一致的行：返回 [[在 a 里的位置, 在 b 里的位置], ...]
+function matchedLines(a, b) {
+  const n = a.length;
+  const m = b.length;
+  const dp = [];
+  for (let i = 0; i <= n; i++) dp.push(new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  }
+  const out = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { out.push([i, j]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
+    else j++;
+  }
+  return out;
+}
+
+// x 相对 base 改了哪几段：[{ a0, a1, x }]，base 的 [a0, a1) 被换成 x（a0 === a1 是插入）
+function changedRegions(base, x) {
+  const out = [];
+  let ia = 0;
+  let ix = 0;
+  matchedLines(base, x).concat([[base.length, x.length]]).forEach((p) => {
+    if (p[0] > ia || p[1] > ix) out.push({ a0: ia, a1: p[0], x: x.slice(ix, p[1]) });
+    ia = p[0] + 1;
+    ix = p[1] + 1;
+  });
+  return out;
+}
+
+// 三方合并：base 是上次同步的内容，mine 是页面里的，theirs 是文件夹里的。
+// 两边改在不同位置的都保留；改在同一位置且内容不同的，取 prefer（'mine' 或 'theirs'）那一边。
+function merge3(base, mine, theirs, prefer) {
+  if (mine === theirs) return { text: mine, conflicts: 0 };
+  if (mine === base) return { text: theirs, conflicts: 0 };
+  if (theirs === base) return { text: mine, conflicts: 0 };
+  const A = String(base).split('\n');
+  const rm = changedRegions(A, String(mine).split('\n'));
+  const rt = changedRegions(A, String(theirs).split('\n'));
+  const out = [];
+  let pos = 0;
+  let pm = 0;
+  let pt = 0;
+  let conflicts = 0;
+  const apply = (regs, s, e) => {
+    const res = [];
+    let at = s;
+    regs.forEach((r) => { res.push.apply(res, A.slice(at, r.a0)); res.push.apply(res, r.x); at = r.a1; });
+    res.push.apply(res, A.slice(at, e));
+    return res;
+  };
+  while (pm < rm.length || pt < rt.length) {
+    const first = !rt[pt] || (rm[pm] && rm[pm].a0 <= rt[pt].a0) ? rm[pm] : rt[pt];
+    let s = first.a0;
+    let e = first.a1;
+    const gotM = [];
+    const gotT = [];
+    let grew = true;
+    while (grew) {
+      grew = false;
+      while (pm < rm.length && rm[pm].a0 <= e) { gotM.push(rm[pm]); e = Math.max(e, rm[pm].a1); pm++; grew = true; }
+      while (pt < rt.length && rt[pt].a0 <= e) { gotT.push(rt[pt]); e = Math.max(e, rt[pt].a1); pt++; grew = true; }
+    }
+    out.push.apply(out, A.slice(pos, s));
+    let chosen;
+    if (!gotT.length) chosen = apply(gotM, s, e);
+    else if (!gotM.length) chosen = apply(gotT, s, e);
+    else {
+      const a = apply(gotM, s, e);
+      const b = apply(gotT, s, e);
+      if (a.join('\n') === b.join('\n')) chosen = a;
+      else { conflicts++; chosen = prefer === 'theirs' ? b : a; }
+    }
+    out.push.apply(out, chosen);
+    pos = e;
+  }
+  out.push.apply(out, A.slice(pos));
+  return { text: out.join('\n'), conflicts };
+}
+
 // ---------- 进度 ----------
 
 function progressCode(word) {
   const w = String(word || '').trim();
-  if (/^(?:未做|Not started|todo)/i.test(w)) return 'todo';
-  if (/^(?:进行中|In progress|doing)/i.test(w)) return 'doing';
-  if (/^(?:已完成|Done)/i.test(w)) return 'done';
-  return '';
+  // 各语言里写的进度词，也认程序内部的代号 todo / doing
+  const code = ['todo', 'doing', 'done'].filter((c) => new RegExp('^(?:' + (c === 'done' ? '' : c + '|') + DOCS.map((d) => reEsc(d.progress[c])).join('|') + ')', 'i').test(w))[0];
+  return code || '';
 }
 
 // 每个功能：名字、做什么、进度（todo / doing / done；没写按 todo）
@@ -438,7 +539,25 @@ function nextProgress(code) {
 
 // ---------- 问题（功能清单里，每个功能下面做的过程中发现的问题）----------
 
-const FIXED_RE = /^(?:已修|Fixed)[：:]\s*/;
+const FIXED_RE = new RegExp('^' + alt((d) => [d.fixed]) + SEPS + '\\s*');
+const DOING_RE = new RegExp('^' + alt((d) => [d.working]) + SEPS + '\\s*');
+
+// 问题前面的状态词：done 是「已修：」，doing 是「处理中：」，todo 没有
+function issuePrefix(md, state) {
+  const d = LOC[docLang(md)].doc;
+  return state === 'done' ? d.fixed + d.sep : state === 'doing' ? d.working + d.sep : '';
+}
+
+// 一条问题的状态：todo（没有前缀）、doing（处理中：）、done（已修：）
+function issueState(body) {
+  if (FIXED_RE.test(body)) return 'done';
+  if (DOING_RE.test(body)) return 'doing';
+  return 'todo';
+}
+
+function stripIssueState(body) {
+  return body.replace(FIXED_RE, '').replace(DOING_RE, '');
+}
 
 // 每个功能的问题：[{ featureLine, items: [{ line, text, done }] }]
 function issueList(md) {
@@ -453,7 +572,8 @@ function issueList(md) {
       if (!lv || !ISSUES_RE.test(lv.label)) continue;
       itemsUnder(lines, j).forEach((k) => {
         const body = info(lines[k]).body;
-        items.push({ line: k, text: body.replace(FIXED_RE, ''), done: FIXED_RE.test(body) });
+        const state = issueState(body);
+        items.push({ line: k, text: stripIssueState(body), state, done: state === 'done' });
       });
     }
     return { featureLine: f.line, no: f.no, name: f.name, items };
@@ -464,7 +584,7 @@ function issueList(md) {
 function addIssue(md, featureLine, text, date) {
   const lines = split(md);
   const lang = docLang(md);
-  const label = lang === 'zh' ? '问题：' : 'Issues:';
+  const label = LOC[lang].doc.issuesLabel;
   const end = bodyRange(lines, featureLine).end;
   const clean = String(text || '').replace(/\s+/g, ' ').trim();
   if (!clean) return { ok: false, code: 'empty' };
@@ -509,14 +629,22 @@ function addIssues(md, items, date) {
   return { ok: true, md: out, added: list.length };
 }
 
-function setIssueDone(md, line, done) {
+// 设定一条问题的状态：todo / doing / done
+function setIssueState(md, line, state) {
   const lines = split(md);
   const t = info(lines[line]);
   if (t.kind !== 'li') return md;
-  const lang = docLang(md);
-  const body = t.body.replace(FIXED_RE, '');
-  lines[line] = ' '.repeat(t.indent) + t.marker + ' ' + (done ? (lang === 'zh' ? '已修：' : 'Fixed: ') : '') + body;
+  const prefix = issuePrefix(md, state);
+  lines[line] = ' '.repeat(t.indent) + t.marker + ' ' + prefix + stripIssueState(t.body);
   return join(lines);
+}
+
+function setIssueDone(md, line, done) {
+  return setIssueState(md, line, done ? 'done' : 'todo');
+}
+
+function nextIssueState(state) {
+  return state === 'todo' ? 'doing' : state === 'doing' ? 'done' : 'todo';
 }
 
 // ---------- 新增块 ----------
@@ -607,16 +735,16 @@ function blankPlan(template, name, date) {
     if (skip) return;
     const t = info(l);
     if (t.kind === 'hr') { skip = true; return; }
-    if (t.kind === 'h' && t.level === 2 && /^(?:最初的描述|Original description)/.test(t.body)) { skip = true; return; }
+    if (t.kind === 'h' && t.level === 2 && ORIGINAL_RE.test(t.body)) { skip = true; return; }
     if (t.kind === 'p' && INSTRUCTION_LINE_RE.test(t.body)) return;
     if (t.kind === 'li' && /^〈/.test(t.body)) return;
     out.push(l);
   });
   const w = WORDS[lang];
-  const sep = lang === 'zh' ? '：' : ': ';
+  const sep = w.sep;
   let md = join(out);
-  md = md.replace(/^#\s+.*$/m, '# ' + w.title + sep + (name || (lang === 'zh' ? '〈项目名〉' : '〈Project name〉')));
-  md = md.replace(/^(状态|Status)[：:].*$/m, w.status + sep + w.states.draft + '　　' + w.updated + sep + (date || today()));
+  md = md.replace(/^#\s+.*$/m, '# ' + w.title + sep + (name || LOC[lang].doc.projectName));
+  md = md.replace(new RegExp('^' + alt((d) => [d.status]) + SEPS + '.*$', 'm'), w.status + sep + w.states.draft + '　　' + w.updated + sep + (date || today()));
   return md.replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
 }
 
@@ -626,7 +754,7 @@ function normalizeForExport(md) {
   const end = footerStart(lines);
   const lang = docLang(md);
   const w = WORDS[lang];
-  const sep = lang === 'zh' ? '：' : ': ';
+  const sep = w.sep;
   return join(lines.map((l, i) => {
     if (i >= end || !isEmptyField(lines, i)) return l;
     const lv = splitLabel(info(l).body);
@@ -638,49 +766,34 @@ function normalizeForExport(md) {
 // ---------- 给 AI 的话 ----------
 
 function buildAiPrompt(md, schema, note, lang) {
-  const L = lang === 'en' ? 'en' : 'zh';
+  const L = LOC[lang] ? lang : DOC_LANGS[0];
+  const d = LOC[L].doc;
   const body = String(md || '').trim();
-  const hasContent = body && split(body).some((l) => info(l).kind === 'p' && !INSTRUCTION_LINE_RE.test(l.trim()) && !/^(?:状态|Status)[：:]/.test(l));
+  const hasContent = body && split(body).some((l) => info(l).kind === 'p' && !INSTRUCTION_LINE_RE.test(l.trim()) && !STATUS_WORD_RE.test(l));
   const template = String(((schema && schema[L]) || {}).planTemplate || '').trim();
-  const rules = L === 'zh' ? [
-    '请把下面的内容整理成「计划书」，按给定格式输出一份完整的 Markdown。',
-    '',
-    '要求：',
-    '1. 只用我说过的内容。我没说的，在它所在的位置写「待补：缺什么」，不要另开一栏。',
-    '2. 一次给出完整草稿，不分批。',
-    '3. 用法、界面上的东西、怎么才算做好，都是一行写完：一步 → 一步。',
-    '4. 我不懂代码，计划书里只写我想要的结果，不写实现方式。',
-    '5. 先做什么、怎么实现由你来定，另外写成做法给我确认，不放进计划书。',
-    '6. 回复末尾列出缺口：编号、位置、缺什么、建议、一个具体的默认值。建议只写在回复里，我确认后才写进计划书。',
-    '7. 我最初说的话原样放在文末「最初的描述」。',
-    '',
-    '格式：',
-  ] : [
-    'Turn the content below into a plan, as one complete Markdown document in the given format.',
-    '',
-    'Rules:',
-    '1. Use only what I have said. Where I have not said it, write "TBD: what is missing" in place; do not add a separate list.',
-    '2. Give the full draft in one go, not in parts.',
-    '3. Ways of using it, things on a screen and "done when" are each written on one line: step → step.',
-    '4. I do not know code. The plan says only the result I want, not how to build it.',
-    '5. What to build first and how to build it are yours to decide; write that up separately for me to confirm, not inside the plan.',
-    '6. End the reply with a list of gaps: number, place, what is missing, a suggestion, one concrete default. Suggestions stay in the reply and go into the plan only after I confirm.',
-    '7. Put my first words, unchanged, at the end under "Original description".',
-    '',
-    'Format:',
-  ];
-  return rules.concat([
+  return d.promptRules.concat([
     '',
     '```markdown',
     template,
     '```',
     '',
-    hasContent ? (L === 'zh' ? '当前计划书：' : 'Current plan:') : (L === 'zh' ? '我的想法：' : 'My idea:'),
+    hasContent ? d.currentPlan : d.myIdea,
     '',
-    hasContent ? body : String(note || (L === 'zh' ? '（在这里写下想法）' : '(write your idea here)')).trim(),
+    hasContent ? body : String(note || d.ideaPlaceholder).trim(),
     '',
-    hasContent && note ? (L === 'zh' ? '补充说明：\n\n' : 'Extra notes:\n\n') + String(note).trim() + '\n' : '',
+    hasContent && note ? d.extraNotes + '\n\n' + String(note).trim() + '\n' : '',
   ]).join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+}
+
+// 导入的文字认不出计划书格式时，包成一份计划书，原文放进「未识别」
+function wrapUnrecognised(text, name, lang, date) {
+  const L = LOC[lang] ? lang : DOC_LANGS[0];
+  const d = LOC[L].doc;
+  return [
+    '# ' + d.title + d.sep + (name || d.projectName), '',
+    d.status + d.sep + d.states.doing + '　　' + d.updated + d.sep + (date || today()), '',
+    '## ' + d.unrecognised, '',
+  ].concat(String(text).split('\n')).join('\n');
 }
 
 // ---------- 反馈 ----------
@@ -688,29 +801,28 @@ function buildAiPrompt(md, schema, note, lang) {
 // 把选取的元素、截图、页面报错和一句话合成一段能直接贴给 AI 的话
 // d: { text, page, view, element, styles, errors, shot }  shot 是附图的说明（文件名或「已复制」）
 function buildFeedback(d, lang) {
-  const L = lang === 'en' ? 'en' : 'zh';
-  const zh = L === 'zh';
+  const F = LOC[LOC[lang] ? lang : DOC_LANGS[0]].doc.feedback;
   const out = [];
-  if (d.page || d.view) out.push((zh ? '页面：' : 'Page: ') + [d.page, d.view].filter(Boolean).join('  '));
-  if (d.element) out.push((zh ? '我指的东西：' : 'The thing I mean: ') + d.element);
-  if (d.styles) out.push((zh ? '它现在的样式：' : 'Its styles now: ') + d.styles);
+  if (d.page || d.view) out.push(F.page + [d.page, d.view].filter(Boolean).join('  '));
+  if (d.element) out.push(F.element + d.element);
+  if (d.styles) out.push(F.styles + d.styles);
   (d.summary || []).forEach((l) => out.push(l));
-  if (d.shot) out.push((zh ? '截图：' : 'Screenshot: ') + d.shot);
-  out.push('', String(d.text || '').trim() || (zh ? '（在这里写想怎么改）' : '(write what to change here)'));
+  if (d.shot) out.push(F.shot + d.shot);
+  out.push('', String(d.text || '').trim() || F.placeholder);
   if (d.errors && d.errors.length) {
-    out.push('', zh ? '页面最近的报错：' : 'Recent errors on the page:');
+    out.push('', F.errors);
     d.errors.forEach((e) => out.push('- ' + e));
   }
   return out.join('\n') + '\n';
 }
 
 module.exports = {
-  SEC, WORDS,
+  SEC, WORDS, PLAN_NAMES, FILE_PREFIXES, PLAN_FILE_RE, TBD_RE, TBD_LABEL_RE, TBD_ALT, TBD_START_RE, issuePrefix, wrapUnrecognised,
   split, join, info, splitLabel, today, timeStamp, docLang,
   rangeEnd, bodyRange, bodyText, setBody, deleteSubtree, sectionNo, headings,
   pendingList, countPending, getStatus, statusLabel, setStatus, markPassed,
   titleName, setTitle, structure, nextNumber, checkName,
-  progressList, setProgress, nextProgress, issueList, addIssue, addIssues, setIssueDone,
+  progressList, setProgress, nextProgress, issueList, addIssue, addIssues, setIssueDone, setIssueState, nextIssueState, merge3,
   addBlock, renameBlock, addFlowLine, blankPlan, normalizeForExport,
   buildAiPrompt, buildFeedback,
 };

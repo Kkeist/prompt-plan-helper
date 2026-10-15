@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, extname, join, normalize, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { T } from './text.mjs';
 
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = join(projectRoot, process.argv[2] || 'web');
@@ -43,7 +44,7 @@ const server = createServer(async (req, res) => {
 function listen(port, limit) {
   server.once('error', (e) => {
     if (e.code === 'EADDRINUSE' && port < limit) listen(port + 1, limit);
-    else { console.error('端口都被占用了：' + e.message); process.exit(1); }
+    else { console.error(T('ports_busy', { why: e.message })); process.exit(1); }
   });
   server.listen({ port, host: '127.0.0.1', exclusive: true }, () => {
     console.log('http://127.0.0.1:' + port + '/');

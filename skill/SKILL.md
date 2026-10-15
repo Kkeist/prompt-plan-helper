@@ -41,9 +41,12 @@ Architecture is decoupled by default and is not asked of the user: modules expos
 
 Once the plan is confirmed it becomes a feature list. Under a feature the user may add a line under `Issues:` (`问题：`). 确认之后计划书转为功能清单，用户可以在功能下的「问题：」里加一行。
 
-1. Fix the open ones (lines without `Fixed:` / `已修：`).
-2. After a fix is checked, prefix that line with `Fixed: ` (`已修：`); do not delete it.
+Each issue has a state shown live in the feature list: no prefix (to do), `Working:` / `处理中：` (being fixed), `Fixed:` / `已修：` (done).
+
+1. List them: `node tools/shupian.mjs issues <plan>` (numbered). Fix the ones that are not `Fixed`.
+2. When you start one, set it to working; when the fix is checked, set it to done. Do not delete it: `node tools/shupian.mjs issue <plan> <number> doing|done`.
 3. A problem that reveals a gap in the plan is also written into the plan first, then fixed. 暴露出计划书缺口的问题，先补计划书再修。
+4. After approval the plan is the initial version; later changes (new features, changed features, issues) are made in the feature list. 确认之后计划书是初版，后面的改动记在功能清单里。
 
 ## Feedback from the floating window / 悬浮窗来的反馈
 

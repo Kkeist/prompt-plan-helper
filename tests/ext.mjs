@@ -97,27 +97,30 @@ try {
   ok('问题记到了所选功能的「问题：」下', /开始按钮没有反应/.test(afterFeature.split('### 4.2')[0]) && /问题[：:]/.test(afterFeature.split('### 4.2')[0]), issueLine);
   ok('问题带着页面信息', /页面：127\.0\.0\.1|页面：localhost|页面：/.test(issueLine), issueLine);
 
-  // 一次记多条：写一条，再写一条换到另一个功能，一起记
+  // 用列表一次记多条：一行一条，回车另起一行，每行各选各的功能
   const clickBtn = (label) => w2('var f=false;r.querySelectorAll("button").forEach(function(b){if(!f&&b.textContent===' + JSON.stringify(label) + '){f=true;b.click()}})');
   await w2('var t=r.querySelector("textarea");t.focus();');
   await page2.insert('关闭再打开没有回到设定值');
-  await clickBtn('再写一条');
+  await page2.key('Enter');
   await page2.sleep(150);
-  ok('再写一条：上一条进入列表', /关闭再打开没有回到设定值/.test(await w2('return r.querySelector(".queued")?r.querySelector(".queued").textContent:""')));
-  await page2.shot(join(root, 'preview', '12-悬浮窗多条问题.png'));
-  await w2('var t=r.querySelector("textarea");t.focus();');
+  ok('回车另起一行，上一行还在', (await w2('return r.querySelectorAll("textarea").length')) === 2 && /关闭再打开没有回到设定值/.test(await w2('return r.querySelectorAll("textarea")[0].value')));
   await page2.insert('完成轮数不加一@');
   await page2.sleep(200);
   await w2('var f=false;r.querySelectorAll(".pop button").forEach(function(b){if(!f&&/^4\.2/.test(b.textContent)){f=true;b.click()}})');
   await page2.sleep(150);
-  ok('输入 @ 可以换到 4.2', /^@ 4\.2/.test(await w2('var b=r.querySelector("button.target");return b?b.textContent:""')), await w2('var b=r.querySelector("button.target");return b?b.textContent:""'));
+  // 第二行继承了上一行的 4.1，@ 选 4.2 是追加；去掉 4.1，这一行只属于 4.2
+  await w2('var rows=r.querySelectorAll(".irow");rows[1].querySelector(".ftag .x").click()');
+  await page2.sleep(150);
+  const targets = await w2('return Array.prototype.map.call(r.querySelectorAll("button.target"),function(b){return b.textContent}).join("|")');
+  ok('每一行各选各的功能', /^@ 4\.1[^|]*\|@ 4\.2/.test(targets), targets);
+  await page2.shot(join(root, 'preview', '12-悬浮窗多条问题.png'));
   await clickBtn('记到计划书');
   let both = '';
   for (let i = 0; i < 40 && !/完成轮数不加一/.test(both); i++) { await sleep(150); both = readFileSync(join(proj, 'plan.md'), 'utf8'); }
   const part41 = (both.split('### 4.1')[1] || '').split('### 4.2')[0];
   const part42 = both.split('### 4.2')[1] || '';
   ok('两条问题各记到了自己的功能下', /关闭再打开没有回到设定值/.test(part41) && /完成轮数不加一/.test(part42) && !/完成轮数不加一/.test(part41), { part41: part41.slice(-160), part42: part42.slice(-160) });
-  ok('记完之后列表清空', (await w2('return r.querySelectorAll(".queued").length')) === 0);
+  ok('记完之后只剩一个空行', (await w2('return r.querySelectorAll("textarea").length')) === 1 && (await w2('return r.querySelector("textarea").value')) === '');
 
   // 页面自己引入了脚本又装了扩展：只留一份悬浮窗，并且是能连桌面小窗口的那份
   const page3 = await chrome.newPage();

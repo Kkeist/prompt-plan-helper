@@ -2,13 +2,13 @@
 
 Status: Draft　　Updated: 〈date〉
 
-## 1 What it is
+## 1 Basics
 
-What it is:
-Who it is for:
-What they get from it:
+Description:
+Intended users:
+Outcome:
 
-## 2 How it is used
+## 2 Usage flow
 
 〈One line per way of using it: the user does something → sees something → does the next thing〉
 
@@ -16,38 +16,39 @@ What they get from it:
 
 ### 3.1 〈Page name〉
 
-What this page is for:
-What is on the page:
+Page purpose:
+Page elements:
 - 〈Name of a thing〉: what it is; what happens when it is clicked or touched
-How the user gets here:
+Entry point:
 
 ## 4 Features
 
 ### 4.1 〈Feature name〉
 
-What it does:
-Done when:
+Feature description:
+Acceptance criteria:
 - 〈A situation〉: what should happen
-Limits:
+Constraints:
 Progress: Not started
 
-## 5 Information to remember
+## 5 Information to keep
 
 - 〈Name of the information〉: what it contains; whether it should still be there next time
 
 ## 6 Style
 
-Style you want:
-Anything to refer to:
-Must not have:
+Visual style:
+References:
+Exclusions:
 
-## 7 Use and requirements
+## 7 Environment and requirements
 
-Where it is used:
-Which languages:
-Where images, texts and sounds come from:
-Accounts or sign-in:
-Anything else:
+Platform:
+Application type:
+Interface languages:
+Asset sources:
+Accounts and sign-in:
+Other requirements:
 
 ## Original description
 
