@@ -52,7 +52,7 @@ Other requirements:
 
 ## Original description
 
-〈When the AI fills this in, it puts your first words here, unchanged〉
+〈Put the first words here, unchanged. The AI does not read this section unless it needs to check the original intent.〉
 
 ---
 

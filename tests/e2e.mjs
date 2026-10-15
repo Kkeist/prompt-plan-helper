@@ -227,12 +227,22 @@ try {
   await page.key('Escape');
   await page.sleep(150);
 
+  console.log('最初的描述：开关');
+  await page.click(btn('⋯'));
+  ok('更多里有「保留最初的描述」，当前是开', await H.exists('.pop button.on', '保留最初的描述', true));
+  await page.click(btn('保留最初的描述'));
+  await page.sleep(150);
+  await page.click(btn('⋯'));
+  ok('关掉之后开关显示为关', !(await H.exists('.pop button.on', '保留最初的描述', true)) && (await H.exists('.pop button', '保留最初的描述', true)));
+  await page.key('Escape');
+  await page.sleep(100);
   console.log('浏览器文件夹：连接、保存、自动读回');
   await page.click(btn('⋯'));
   await page.click(btn('连接文件夹'));
   await H.wait(async () => (await page.eval('Object.keys(__fs).length')) > 0, 30);
   const saved = await page.eval('__fs["plan.md"] || ""');
   ok('计划书写进了文件夹（plan.md），带问题', /进度：已完成/.test(saved) && /已修：点暂停后数字仍在走/.test(saved), saved.slice(0, 80));
+  ok('关掉开关之后，写进文件夹的计划书没有最初的描述', !/最初的描述/.test(saved), saved.slice(-80));
   await page.eval('__fs["plan.md"] = __fs["plan.md"].replace(/(### 4\\.2[\\s\\S]*?进度：)[^\\n]*/, "$1已完成")');
   const t0 = Date.now();
   await H.wait(async () => /已完成 2 \/ 3/.test((await H.text('.status-head .muted')) || ''), 80);
@@ -306,6 +316,15 @@ try {
   const HW = helpers(win);
   await win.goto(url + '&view=hub');
   await HW.wait(async () => HW.exists('.frow'), 40);
+  await HW.wait(async () => !(await win.eval('__one(".extrow").classList.contains("wait")')), 40);
+  ok('最近页顶上提示悬浮窗要装扩展', (await HW.exists('.extrow .muted', '需要先安装浏览器扩展')) && (await HW.exists('.extrow button', '安装浏览器扩展', true)), await HW.text('.extrow'));
+  await win.click(Q('.extrow button', '安装浏览器扩展', true));
+  await HW.wait(async () => HW.exists('.modal .steps'), 40);
+  const extPath = await HW.text('.modal .fpath');
+  ok('安装弹窗：三步说明和扩展文件夹地址', (await win.eval('__deep(".modal .steps li").length')) === 3 && /extension$/.test(extPath || ''), extPath);
+  ok('扩展文件夹里有清单和脚本', existsSync(join(extPath || '.', 'manifest.json')) && existsSync(join(extPath || '.', 'shupian.js')), extPath);
+  await win.key('Escape');
+  await win.sleep(100);
   ok('先显示「最近」标签', await HW.exists('.tabbar .chip.on', '最近', true));
   ok('列出最近在用的文件夹', await HW.exists('.frow .fname', '番茄钟项目'), await win.eval('__one(".folders") && __one(".folders").textContent'));
   ok('标出「使用中」', await HW.exists('.badge', '使用中'));
@@ -470,7 +489,7 @@ try {
   ok('Alt+Shift+S 打开小窗', (await fpage.eval('__one(".win").style.display')) !== 'none');
   const win1 = await fpage.rectOf(fq('.win'));
   ok('悬浮窗是小窗：宽不超过 330、高不超过 330', win1.w <= 330 && win1.h <= 330, win1);
-  ok('三个动作按钮', (await HP.exists('button', '选取元素', true)) && (await HP.exists('button', '区域截图', true)) && (await HP.exists('button', '当前页面', true)));
+  ok('顶上两个动作按钮，选取元素只在每条问题上', !(await HP.exists('button', '选取元素', true)) && (await HP.exists('button', '＋ 选取元素', true)) && (await HP.exists('button', '区域截图', true)) && (await HP.exists('button', '当前页面', true)));
   await fpage.shot(join(shots, '07-悬浮窗-1280.png'));
   const hdr = await fpage.rectOf(fq('.collapse'));
   await fpage.drag(hdr.x, hdr.y, hdr.x - 300, hdr.y + 100);
@@ -495,7 +514,7 @@ try {
   await fpage.sleep(800);
   const dims = await fpage.eval('(function(){var i=__one(".chipline img.shot");return new Promise(function(r){function done(){r([i.naturalWidth,i.naturalHeight])}if(i.complete&&i.naturalWidth)return done();i.onload=done;setTimeout(done,3000)})})()');
   ok('区域截图：图的大小是框出来的区域', dims[0] === 300 && dims[1] === 160, dims);
-  await fpage.click(fq('button', '选取元素', true));
+  await fpage.click(fq('button', '＋ 选取元素', true));
   await fpage.sleep(150);
   const target = await fpage.eval('(function(){var r=document.querySelector("h1").getBoundingClientRect();return {x:r.left+20,y:r.top+10}})()');
   await fpage.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: target.x, y: target.y });

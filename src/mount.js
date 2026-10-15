@@ -210,6 +210,7 @@ function mountFloat(autoOpen) {
   const start = () => {
     const page = document.getElementById('shupian-app');
     if (page && Link.available && SERVER) {
+      document.documentElement.setAttribute('data-shupian-ext', '');
       chrome.runtime.sendMessage({ shupian: 'pair', port: location.port, token: SERVER.token }, () => void chrome.runtime.lastError);
       return;
     }

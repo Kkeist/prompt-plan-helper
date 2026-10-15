@@ -1,5 +1,5 @@
 'use strict';
-// 悬浮在别的页面上的小窗：指出一个东西、框一块区域或记下当前页面，用列表一次写下多个问题，合成一段话复制给 AI。
+// 悬浮在别的页面上的小窗：在每一条问题上指出一个东西，或框一块区域、记下当前页面，用列表一次写下多个问题，合成一段话复制给 AI。
 // 在浏览器扩展里并且打开过桌面小窗口时，每一行可以选一个功能（输入 @ 切换），再一起记到计划书里对应功能的下面。
 
 function createFeedback(opts) {
@@ -175,11 +175,6 @@ function createFeedback(opts) {
     render();
   }
 
-  // 顶上的「选取元素」加到当前这一条
-  function pick() {
-    return pickInto(list.focusedRow());
-  }
-
   async function region() {
     try {
       const r = await tools.region();
@@ -212,7 +207,6 @@ function createFeedback(opts) {
     clear(body);
     body.append(h('div', { class: 'row tight' },
       collapse,
-      h('button', { type: 'button', class: 'btn', onclick: pick }, t('pick_an_element')),
       h('button', { type: 'button', class: 'btn', onclick: region }, t('region_screenshot')),
       h('button', { type: 'button', class: 'btn', onclick: currentPage }, t('current_page'))));
     if (S.info) {

@@ -51,3 +51,48 @@ function folderRows(container, o) {
     container.append(h('p', { class: 'err', text: t('could_not_read_the_folder_list_why', { why: errText(e) }) }));
   });
 }
+
+// 页面悬浮窗靠浏览器扩展出现：扩展的脚本在这个页面里留下一个标记
+function extensionInstalled() {
+  return document.documentElement.hasAttribute('data-shupian-ext');
+}
+
+// 安装步骤：扩展文件由本机服务放到固定的文件夹，浏览器里加载这个文件夹
+async function openExtensionHelp(kit) {
+  let info;
+  try {
+    info = await Api.call('GET', '/api/extension');
+  } catch (e) {
+    kit.toast(t('could_not_prepare_the_extension_why', { why: errText(e) }));
+    return;
+  }
+  const openPage = (b) => Api.call('POST', '/api/extension', { browser: b.id }).catch((e) => kit.toast(t('could_not_open_the_extensions_page_why', { why: errText(e) })));
+  const steps = [t('extension_step_open'), t('extension_step_load'), t('extension_step_done')].map((x) => h('li', { text: x }));
+  kit.openModal({
+    title: t('install_the_browser_extension'),
+    body: h('div', null,
+      h('ol', { class: 'steps' }, steps),
+      h('div', { class: 'muted', text: t('extension_folder') }),
+      h('button', { type: 'button', class: 'fpath', title: t('copy_path'), 'aria-label': t('copy_path') + '：' + info.path, onclick: () => copyThen(kit, info.path) }, info.path),
+      info.browsers.length ? null : h('p', { class: 'hint', text: t('no_edge_or_chrome_was_found') })),
+    foot: (close) => [h('button', { type: 'button', class: 'btn', onclick: close }, t('close'))].concat(
+      info.browsers.map((b, i) => h('button', { type: 'button', class: 'btn' + (i === 0 ? ' primary' : ''), onclick: () => openPage(b) }, t('open_the_extensions_page_in_name', { name: b.name })))),
+  });
+}
+
+// 「最近」页顶上的一行：悬浮窗要不要装扩展。检测完成前占位不显示，避免下面的内容移位。
+function extensionRow(kit) {
+  const row = h('div', { class: 'extrow wait' });
+  setTimeout(() => {
+    row.classList.remove('wait');
+    clear(row);
+    if (extensionInstalled()) {
+      row.append(h('span', { class: 'muted', text: t('the_page_floating_window_is_on_alt_shift_s') }));
+      return;
+    }
+    row.append(h('span', { class: 'muted', text: t('the_page_floating_window_needs_the_browser_extension') }),
+      h('button', { type: 'button', class: 'btn sm primary', onclick: () => openExtensionHelp(kit) }, t('install_the_browser_extension')));
+  }, 1200);
+  row.append(h('span', { class: 'muted', text: t('the_page_floating_window_is_on_alt_shift_s') }));
+  return row;
+}

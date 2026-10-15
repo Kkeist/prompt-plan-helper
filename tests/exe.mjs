@@ -70,6 +70,11 @@ try {
   // 新建文件夹和按名字找文件夹：两个版本都要通过同样的检查
   async function folderChecks(label, info, made) {
     const post = (path, obj) => call(info, path, { method: 'POST', body: JSON.stringify(obj) });
+    const ext = await call(info, '/api/extension');
+    const extDir = ext.json && ext.json.path;
+    ok(label + '：扩展文件放到了固定的文件夹', !!extDir && extDir.startsWith(home) && existsSync(join(extDir, 'manifest.json')) && existsSync(join(extDir, 'background.js')) && existsSync(join(extDir, 'icons', '128.png')), ext.text.slice(0, 160));
+    ok(label + '：扩展脚本和网页里的是同一份', !!extDir && readFileSync(join(extDir, 'shupian.js'), 'utf8') === readFileSync(join(root, 'web', 'shupian.js'), 'utf8'));
+    ok(label + '：扩展接口列出浏览器，不认识的浏览器被拒绝', Array.isArray(ext.json.browsers) && (await post('/api/extension', { browser: 'nothing' })).status === 404, ext.text.slice(0, 160));
     const r = await post('/api/mkdir', { parent: proj, name: made });
     ok(label + '：新建文件夹', r.status === 200 && existsSync(join(proj, made)) && r.json.name === made, r.text.slice(0, 120));
     ok(label + '：同名文件夹被拒绝', (await post('/api/mkdir', { parent: proj, name: made })).status === 409);

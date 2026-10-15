@@ -227,6 +227,15 @@ function createApp(opts) {
     renderStatus();
   }
 
+  // 「最初的描述」去掉时正文记在这一次打开的页面里，再打开开关时放回去；去掉也可以撤销
+  const droppedOriginal = {};
+  function setOriginal(keep) {
+    const r = Core.setOriginal(S.md, keep, droppedOriginal[S.project.id]);
+    if (!keep) droppedOriginal[S.project.id] = r.text;
+    commit(r.md, true);
+    renderBody();
+  }
+
   function undo() {
     if (!S.past.length) return false;
     S.future.push(S.md);
@@ -1269,10 +1278,14 @@ function createApp(opts) {
         add(t('copy_prompt'), openAiPrompt);
         add(t('export'), exportPlan);
         pop.append(h('hr'));
+        const keep = Core.hasOriginal(S.md);
+        add(t('keep_the_original_description'), () => setOriginal(!keep), { on: keep });
+        pop.append(h('hr'));
       }
       add(t('view_an_example'), loadExample);
       add(t('new_blank_plan'), newBlank);
       add(t('import'), openImport);
+      if (SERVER) add(t('install_the_browser_extension'), () => openExtensionHelp(kit));
       if (has) {
         add(t('undo'), () => { if (!undo()) toast(t('there_is_nothing_to_undo')); });
         add(t('redo'), () => { if (!redo()) toast(t('there_is_nothing_to_redo')); });
@@ -1353,7 +1366,7 @@ function createApp(opts) {
       onNewPlan: newPlanHere,
       onNewFolder: () => newFolderFlow(connectFolderPath),
     });
-    return h('div', { class: 'col' }, list);
+    return h('div', { class: 'col' }, SERVER ? extensionRow(kit) : null, list);
   }
 
   function renderBody() {

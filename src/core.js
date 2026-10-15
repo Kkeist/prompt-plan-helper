@@ -723,6 +723,39 @@ function addFlowLine(md) {
   return { ok: true, md: join(lines.slice(0, at).concat(add, lines.slice(at))), line: at + add.length - 1 };
 }
 
+// ---------- 最初的描述：可以保留，也可以去掉 ----------
+
+function originalRange(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const t = info(lines[i]);
+    if (t.kind === 'h' && t.level === 2 && ORIGINAL_RE.test(t.body)) return { start: i, end: rangeEnd(lines, i) };
+  }
+  return null;
+}
+
+function hasOriginal(md) {
+  return !!originalRange(split(md));
+}
+
+// keep 为 false 时去掉这一节并返回去掉的正文；为 true 且没有这一节时加在页脚之前，正文用 text，没有就写说明
+function setOriginal(md, keep, text) {
+  const lines = split(md);
+  const at = originalRange(lines);
+  if (!keep) {
+    if (!at) return { md, text: '' };
+    const body = join(lines.slice(at.start + 1, at.end)).trim();
+    let from = at.start;
+    while (from > 0 && info(lines[from - 1]).kind === 'blank') from--;
+    return { md: join(lines.slice(0, from).concat(lines.slice(at.end))).replace(/\n{3,}/g, '\n\n'), text: body };
+  }
+  if (at) return { md, text: '' };
+  const d = LOC[docLang(md)].doc;
+  const end = footerStart(lines);
+  const block = ['', '## ' + d.originalDescription, '', String(text || '').trim() || d.originalPlaceholder];
+  const tail = end < lines.length ? [''] : [];
+  return { md: join(lines.slice(0, end).concat(block, tail, lines.slice(end))).replace(/\n{3,}/g, '\n\n'), text: '' };
+}
+
 // ---------- 新建、导出 ----------
 
 // template 是 plan.md 的内容；语言按模板自己的语言
@@ -823,6 +856,6 @@ module.exports = {
   pendingList, countPending, getStatus, statusLabel, setStatus, markPassed,
   titleName, setTitle, structure, nextNumber, checkName,
   progressList, setProgress, nextProgress, issueList, addIssue, addIssues, setIssueDone, setIssueState, nextIssueState, merge3,
-  addBlock, renameBlock, addFlowLine, blankPlan, normalizeForExport,
+  addBlock, renameBlock, addFlowLine, blankPlan, normalizeForExport, hasOriginal, setOriginal,
   buildAiPrompt, buildFeedback,
 };

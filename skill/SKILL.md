@@ -20,7 +20,7 @@ Formats and the example (this tool's own plan) are in `references/zh` and `refer
 - Use the template exactly: numbered sections 1 to 7, one block per page and per feature.
 - Use only what the user said. Anything missing is written in place as `TBD: what is missing` (`待补：缺什么`), never in a separate list.
 - Ways of using it and "done when" take one line each: `step → step → step`.
-- Put the user's first words, unchanged, at the end under "Original description".
+- Put the user's first words, unchanged, at the end under "Original description". Do not read that section normally; read it only to check what the user originally meant.
 - No build order and no implementation details in the plan. 计划书里不写开发顺序和实现方式。
 - Examples and placeholders use invented or category words, never the user's own project.
 - End the reply with the gaps: number, place, what is missing, a suggestion, one concrete default. Suggestions stay in the reply until the user confirms.

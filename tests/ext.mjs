@@ -68,6 +68,10 @@ try {
   await helper.goto('http://127.0.0.1:' + info.port + '/index.html?k=' + info.token + '&win=1');
   await helper.sleep(800);
   ok('桌面小窗口页面只有一个应用，没有再挂悬浮窗', (await helper.eval('document.querySelectorAll("[data-shupian]").length')) === 0);
+  ok('桌面小窗口页面里留下扩展已安装的标记', await helper.eval('document.documentElement.hasAttribute("data-shupian-ext")'));
+  await helper.sleep(1500);
+  const extRow = await helper.eval('(function(){var e=__one(".extrow");return e?e.textContent:""})()');
+  ok('最近页显示悬浮窗已开启，没有安装按钮', /已开启/.test(extRow) && !/安装浏览器扩展/.test(extRow), extRow);
 
   const page2 = await chrome.newPage();
   await page2.init(DEEP);

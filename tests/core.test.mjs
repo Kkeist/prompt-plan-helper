@@ -259,3 +259,27 @@ test('问题的三种状态：待处理、处理中、已修', () => {
   const en = Core.addIssue(timerEn, Core.issueList(timerEn)[0].featureLine, 'Stuck', '2026-01-02');
   assert.match(Core.setIssueState(en.md, Core.issueList(en.md)[0].items[0].line, 'doing'), /- Working: Stuck/);
 });
+
+test('最初的描述：可以去掉，也可以放回去', () => {
+  for (const md of [timerZh, timerEn]) {
+    assert.equal(Core.hasOriginal(md), true);
+    const off = Core.setOriginal(md, false);
+    assert.equal(Core.hasOriginal(off.md), false);
+    assert.ok(off.text.length > 0);
+    assert.ok(!off.md.includes(off.text));
+    assert.ok(Core.issueList(off.md).length === Core.issueList(md).length);
+    // 放回去：原来的正文回到文末
+    const on = Core.setOriginal(off.md, true, off.text);
+    assert.equal(Core.hasOriginal(on.md), true);
+    assert.ok(on.md.includes(off.text));
+    assert.equal(on.md.trim(), md.trim());
+    // 已有就不重复加，没有就不重复删
+    assert.equal(Core.setOriginal(md, true).md, md);
+    assert.equal(Core.setOriginal(off.md, false).md, off.md);
+  }
+  // 没有记下正文时放回的是说明行；有页脚时加在页脚之前
+  const withFooter = Core.setOriginal(tplZh, false).md;
+  assert.doesNotMatch(withFooter, /最初的描述/);
+  const back = Core.setOriginal(withFooter, true).md;
+  assert.match(back, /## 最初的描述\n\n〈[^〉]+〉\n\n---/);
+});

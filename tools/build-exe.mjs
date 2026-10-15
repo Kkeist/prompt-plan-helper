@@ -43,6 +43,10 @@ files(web).forEach((f) => {
   const logical = 'web/' + relative(web, f).replace(/\\/g, '/');
   args.push('/resource:' + f + ',' + logical);
 });
+// 浏览器扩展的文件也嵌进去，在「安装浏览器扩展」时放到固定的文件夹
+files(join(root, 'extension')).forEach((f) => {
+  args.push('/resource:' + f + ',ext/' + relative(join(root, 'extension'), f).replace(/\\/g, '/'));
+});
 args.push('/resource:' + join(web, 'shupian.ico') + ',shupian.ico');
 args.push(join(root, 'desktop', 'PlanHelper.cs'));
 

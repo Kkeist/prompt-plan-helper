@@ -380,6 +380,47 @@ class Server
         return list.FirstOrDefault(File.Exists);
     }
 
+    // 本机装了的浏览器：代号、名称、程序路径、扩展页地址
+    public static List<string[]> Browsers()
+    {
+        var pf86 = Environment.GetEnvironmentVariable("ProgramFiles(x86)") ?? "";
+        var pf = Environment.GetEnvironmentVariable("ProgramFiles") ?? "";
+        var all = new[]
+        {
+            new[] { "edge", "Edge", Path.Combine(pf86, "Microsoft", "Edge", "Application", "msedge.exe"), "edge://extensions/" },
+            new[] { "edge", "Edge", Path.Combine(pf, "Microsoft", "Edge", "Application", "msedge.exe"), "edge://extensions/" },
+            new[] { "chrome", "Chrome", Path.Combine(pf, "Google", "Chrome", "Application", "chrome.exe"), "chrome://extensions/" },
+            new[] { "chrome", "Chrome", Path.Combine(pf86, "Google", "Chrome", "Application", "chrome.exe"), "chrome://extensions/" },
+        };
+        var found = new List<string[]>();
+        foreach (var b in all)
+            if (File.Exists(b[2]) && !found.Any(x => x[0] == b[0])) found.Add(b);
+        return found;
+    }
+
+    // 浏览器扩展：嵌在 exe 里的文件放到固定的文件夹（内容有变才写），浏览器里「加载解压缩的扩展」选这个文件夹
+    string SyncExtension()
+    {
+        var dir = Path.Combine(home, ".shupian", "extension");
+        var asm = Assembly.GetExecutingAssembly();
+        foreach (var name in asm.GetManifestResourceNames())
+        {
+            if (!name.StartsWith("ext/")) continue;
+            var to = Path.Combine(dir, name.Substring(4).Replace('/', Path.DirectorySeparatorChar));
+            byte[] data;
+            using (var s = asm.GetManifestResourceStream(name))
+            using (var ms = new MemoryStream())
+            {
+                s.CopyTo(ms);
+                data = ms.ToArray();
+            }
+            if (File.Exists(to) && File.ReadAllBytes(to).SequenceEqual(data)) continue;
+            Directory.CreateDirectory(Path.GetDirectoryName(to));
+            File.WriteAllBytes(to, data);
+        }
+        return dir;
+    }
+
     public void Start()
     {
         var start = 14165;
@@ -520,6 +561,24 @@ class Server
             var made = Remember(target);
             SendJson(ctx, 200, new { path = made, name = Path.GetFileName(made) });
             return;
+        }
+        if (path == "/api/extension")
+        {
+            if (ctx.Request.HttpMethod == "GET")
+            {
+                SendJson(ctx, 200, new { path = SyncExtension(), browsers = Browsers().Select(b => new { id = b[0], name = b[1] }).ToList() });
+                return;
+            }
+            if (ctx.Request.HttpMethod == "POST")
+            {
+                var obj = Json.DeserializeObject(Encoding.UTF8.GetString(ReadBody(ctx))) as Dictionary<string, object>;
+                var id = obj != null && obj.ContainsKey("browser") ? Convert.ToString(obj["browser"]) : "";
+                var b = Browsers().FirstOrDefault(x => x[0] == id);
+                if (b == null) { SendJson(ctx, 404, new { error = "browser" }); return; }
+                Process.Start(b[2], b[3]);
+                SendJson(ctx, 200, new { ok = true });
+                return;
+            }
         }
         if (path == "/api/current" && ctx.Request.HttpMethod == "POST")
         {

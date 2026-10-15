@@ -19,6 +19,8 @@ export const STATE_DIR = join(home, '.shupian');
 export const STATE_FILE = join(STATE_DIR, 'server.json');
 const HISTORY_FILE = join(STATE_DIR, 'history.json');
 const PLAN_NAMES = Core.PLAN_NAMES;
+const EXT_SRC = join(projectRoot, 'extension');
+export const EXT_DIR = join(STATE_DIR, 'extension');
 const IDLE_MS = 30 * 60 * 1000;
 const ACTIVE_MS = 10 * 60 * 1000;
 
@@ -168,6 +170,34 @@ const types = {
   '.webmanifest': 'application/manifest+json', '.xml': 'application/xml',
 };
 
+// 浏览器扩展：把文件放到固定的文件夹（内容有变才写），浏览器里「加载解压缩的扩展」选这个文件夹
+function extensionFiles(dir, rel) {
+  return readdirSync(dir).flatMap((n) => {
+    const p = join(dir, n);
+    return statSync(p).isDirectory() ? extensionFiles(p, join(rel, n)) : [join(rel, n)];
+  });
+}
+
+export function syncExtension() {
+  extensionFiles(EXT_SRC, '').forEach((rel) => {
+    const buf = readFileSync(join(EXT_SRC, rel));
+    const to = join(EXT_DIR, rel);
+    if (existsSync(to) && readFileSync(to).equals(buf)) return;
+    mkdirSync(dirname(to), { recursive: true });
+    writeFileSync(to, buf);
+  });
+  return EXT_DIR;
+}
+
+// 本机装了的浏览器，及各自的扩展页地址
+const BROWSERS = [
+  { id: 'edge', name: 'Edge', page: 'edge://extensions/', exe: ['Microsoft/Edge/Application/msedge.exe'] },
+  { id: 'chrome', name: 'Chrome', page: 'chrome://extensions/', exe: ['Google/Chrome/Application/chrome.exe'] },
+].map((b) => Object.assign(b, {
+  path: ['ProgramFiles(x86)', 'ProgramFiles'].map((v) => process.env[v]).filter(Boolean)
+    .flatMap((base) => b.exe.map((e) => join(base, e))).filter((e) => existsSync(e))[0] || '',
+})).filter((b) => b.path);
+
 function pickFolder(description) {
   return new Promise((resolvePick) => {
     const script = [
@@ -233,6 +263,20 @@ export function startServer() {
           const full = remember(target);
           json(200, { path: full, name: basename(full) });
           return;
+        }
+        if (url.pathname === '/api/extension') {
+          if (req.method === 'GET') {
+            json(200, { path: syncExtension(), browsers: BROWSERS.map((b) => ({ id: b.id, name: b.name })) });
+            return;
+          }
+          if (req.method === 'POST') {
+            const body = await readJsonBody();
+            const b = BROWSERS.filter((x) => x.id === body.browser)[0];
+            if (!b) { json(404, { error: 'browser' }); return; }
+            spawn(b.path, [b.page], { detached: true, stdio: 'ignore' }).unref();
+            json(200, { ok: true });
+            return;
+          }
         }
         if (url.pathname === '/api/current' && req.method === 'POST') {
           const body = await readJsonBody();
