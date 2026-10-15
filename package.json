@@ -1,0 +1,16 @@
+{
+  "name": "prompt-plan-helper",
+  "version": "1.0.0",
+  "description": "帮助新项目计划书的书写模板 / A plan template helper for new projects",
+  "license": "MIT",
+  "private": false,
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "icons": "node tools/build-icons.mjs",
+    "serve": "node tools/serve.mjs web",
+    "test": "node --test tests/core.test.mjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "test:ext": "node tests/ext.mjs",
+    "i18n": "node tools/i18n-keys.mjs"
+  }
+}
