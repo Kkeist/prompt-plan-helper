@@ -39,14 +39,17 @@ Architecture is decoupled by default and is not asked of the user: modules expos
 
 ## Issues / 问题
 
-Once the plan is confirmed it becomes a feature list. Under a feature the user may add a line under `Issues:` (`问题：`). 确认之后计划书转为功能清单，用户可以在功能下的「问题：」里加一行。
+The feature list is a separate file from the plan: `features.md` next to `plan.md` (`功能清单.md` next to `计划书.md`, `features-<name>.md` next to `plan-<name>.md`). It appears the first time work starts: a feature is set to working or done, or an issue is recorded. Until then, even after confirmation, the plan is simply updated. 功能清单和计划书是两份文件，第一次开始做时才出现；确认之后还没开始做，就只是更新计划书。
+
+Under a feature the user may add a line under `Issues:` (`问题：`), on the page, in the floating window, or by editing the file.
 
 Each issue has a state shown live in the feature list: no prefix (to do), `Working:` / `处理中：` (being fixed), `Fixed:` / `已修：` (done).
 
-1. List them: `node tools/shupian.mjs issues <plan>` (numbered). Fix the ones that are not `Fixed`.
+1. List them: `node tools/shupian.mjs issues <plan>` (numbered; it reads the feature list when there is one). Fix the ones that are not `Fixed`.
 2. When you start one, set it to working; when the fix is checked, set it to done. Do not delete it: `node tools/shupian.mjs issue <plan> <number> doing|done`.
 3. A problem that reveals a gap in the plan is also written into the plan first, then fixed. 暴露出计划书缺口的问题，先补计划书再修。
-4. After approval the plan is the initial version; later changes (new features, changed features, issues) are made in the feature list. 确认之后计划书是初版，后面的改动记在功能清单里。
+4. Once work has started the initial plan is not changed any more: new features, changed features, progress and issues are all made in the feature list, and the progress you set there is the state of the work right now. 开始做之后初始计划书不再改，加功能、改功能、进度和问题都记在功能清单里，进度代表当下的情况。
+5. Do not delete features the user wrote in the feature list; the app keeps earlier versions in `.shupian/history/` of the project folder, but do not rely on it.
 
 ## Feedback from the floating window / 悬浮窗来的反馈
 

@@ -149,6 +149,35 @@ try {
     target3 = await page3.eval('(function(){var r=document.querySelector("[data-shupian]").shadowRoot;var b=r.querySelector("button.target");return b?b.textContent:""})()');
   }
   ok('留下的是能连桌面小窗口的那一个，并记着上次选的功能', /^@ 4\.2/.test(target3), target3);
+
+  // 计划书已确认并且已经开始做：问题记到独立的功能清单里，计划书不再改
+  const planFile = join(proj, 'plan.md');
+  writeFileSync(planFile, readFileSync(planFile, 'utf8').replace(/^状态[：:][^　\r\n]*/m, '状态：已通过'));
+  const planBefore = readFileSync(planFile, 'utf8');
+  const page4 = await chrome.newPage();
+  await page4.init(DEEP);
+  await page4.resize(1280, 800);
+  await page4.goto(base + 'tests/fixtures/plain.html');
+  await page4.sleep(600);
+  await page4.eval('window.postMessage({ shupian: "open" }, "*")');
+  const w4 = (js) => page4.eval('(function(){var r=document.querySelector("[data-shupian]").shadowRoot;' + js + '})()');
+  let target4 = '';
+  for (let i = 0; i < 60 && !target4; i++) {
+    await page4.sleep(150);
+    target4 = await w4('var b=r.querySelector("button.target");return b?b.textContent:""');
+  }
+  ok('已确认的计划书：悬浮窗读到的是它的功能', /^@ 4\.\d/.test(target4), target4);
+  await w4('var t=r.querySelector("textarea");t.focus();');
+  await page4.insert('点开始后界面没有变化');
+  await w4('r.querySelectorAll("button").forEach(function(b){if(b.textContent==="记到计划书")b.click()})');
+  const featuresFile = join(proj, 'features.md');
+  let featuresText = '';
+  for (let i = 0; i < 40 && !/点开始后界面没有变化/.test(featuresText); i++) {
+    await sleep(150);
+    try { featuresText = readFileSync(featuresFile, 'utf8'); } catch (e) { featuresText = ''; }
+  }
+  ok('问题记进了新建的功能清单（features.md），在所选功能下面', /^# 功能清单/.test(featuresText) && /### 4\.\d[\s\S]*点开始后界面没有变化/.test(featuresText), featuresText.slice(0, 80));
+  ok('计划书本身没有被改', readFileSync(planFile, 'utf8') === planBefore);
 } finally {
   await chrome.close();
   srv.kill();

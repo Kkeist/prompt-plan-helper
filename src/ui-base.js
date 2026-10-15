@@ -213,6 +213,32 @@ const Folder = {
     await w.write(data);
     await w.close();
   },
+  // 历史版本：项目文件夹里 .shupian/history/ 下，名字是 时间-功能清单文件名.md；最新的在前
+  async historyList(handle, file) {
+    if (handle.server) {
+      const r = await Api.call('GET', '/api/history?root=' + encodeURIComponent(handle.root) + '&file=' + encodeURIComponent(file));
+      return r.items;
+    }
+    let d;
+    try {
+      d = await Folder.dir(handle, ['.shupian', 'history'], false);
+    } catch (e) {
+      if (e && e.name === 'NotFoundError') return [];
+      throw e;
+    }
+    const out = [];
+    for await (const pair of d.entries()) {
+      const name = pair[0];
+      if (pair[1].kind === 'file' && /^\d{8}-\d{6}-/.test(name) && name.slice(16).toLowerCase() === file.toLowerCase()) out.push({ name });
+    }
+    return out.sort((a, b) => (a.name < b.name ? 1 : -1));
+  },
+  // 浏览器授权的文件夹没有服务替它清理：只留最近的 keep 份
+  async historyPrune(handle, file, keep) {
+    const all = await Folder.historyList(handle, file);
+    const d = await Folder.dir(handle, ['.shupian', 'history'], false);
+    for (const it of all.slice(keep)) await d.removeEntry(it.name);
+  },
 };
 
 // ---------- 下载和复制 ----------

@@ -15,7 +15,16 @@ function createFeedback(opts) {
   const link = { state: Link.available ? 'loading' : 'off', why: '', projects: [], project: null, features: [], target: null };
   const targetKey = NS + ':target';
   const planName = (x) => ((x.summary && x.summary.title) || x.name) + (x.multi ? '（' + x.file + '）' : '');
-  const planUrl = (x) => '/api/file?root=' + encodeURIComponent(x.path) + '&p=' + encodeURIComponent(x.file);
+  const fileUrl = (x, file) => '/api/file?root=' + encodeURIComponent(x.path) + '&p=' + encodeURIComponent(file);
+  // 开始做之后问题记在功能清单里：已有功能清单就读它；计划书已确认但还没有功能清单时由计划书生成，记问题时才创建文件；
+  // 计划书还没确认就是计划书本身。返回 { file（记到哪个文件）, exists, text }
+  async function readDoc(x) {
+    const s = x.summary || {};
+    if (s.hasFeatures) return Object.assign({ file: s.featureFile }, await Link.call('GET', fileUrl(x, s.featureFile)));
+    const plan = await Link.call('GET', fileUrl(x, x.file));
+    if (plan.exists && s.status === 'approved' && s.featureFile) return { file: s.featureFile, exists: true, text: Core.makeFeatureList(plan.text) };
+    return Object.assign({ file: x.file }, plan);
+  }
   const featLabel = (f) => (f.no ? f.no + ' ' : '') + f.name;
 
   const list = createIssueList({
@@ -82,7 +91,7 @@ function createFeedback(opts) {
   async function loadPlan() {
     link.features = [];
     if (!link.project) { link.state = 'empty'; return; }
-    const f = await Link.call('GET', planUrl(link.project));
+    const f = await readDoc(link.project);
     if (!f.exists) { link.state = 'empty'; return; }
     link.features = Core.issueList(f.text);
     const saved = LS.get(targetKey, null) || {};
@@ -137,7 +146,7 @@ function createFeedback(opts) {
     if (!items.length) { kit.toast(t('write_the_issue_first')); return; }
     if (items.some((it) => !it.fs.length)) { kit.toast(t('choose_a_feature_for_every_issue')); return; }
     try {
-      const f = await Link.call('GET', planUrl(link.project));
+      const f = await readDoc(link.project);
       const feats = f.exists ? Core.issueList(f.text) : [];
       // 一条问题 @ 了几个功能，就记到每个功能下面
       const hits = [];
@@ -152,7 +161,7 @@ function createFeedback(opts) {
       }
       const r = Core.addIssues(f.text, hits.map((x) => ({ featureLine: x.hit.featureLine, text: x.it.text + whereText(x.it) })), Core.today());
       if (!r.ok) { kit.toast(t('write_the_issue_first')); return; }
-      await Link.call('PUT', planUrl(link.project), r.md);
+      await Link.call('PUT', fileUrl(link.project, f.file), r.md);
       list.reset(link.target);
       render();
       kit.toast(t('added_n_issues_to_the_plan', { n: r.added }));

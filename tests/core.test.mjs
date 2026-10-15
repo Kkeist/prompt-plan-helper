@@ -283,3 +283,39 @@ test('最初的描述：可以去掉，也可以放回去', () => {
   const back = Core.setOriginal(withFooter, true).md;
   assert.match(back, /## 最初的描述\n\n〈[^〉]+〉\n\n---/);
 });
+
+test('功能清单：文件名对应、从计划书生成、开始做的判断', () => {
+  assert.equal(Core.featureFileFor('plan.md'), 'features.md');
+  assert.equal(Core.featureFileFor('计划书.md'), '功能清单.md');
+  assert.equal(Core.featureFileFor('plan-第二版.md'), 'features-第二版.md');
+  assert.equal(Core.featureFileFor('计划书-第二版.md'), '功能清单-第二版.md');
+  assert.equal(Core.featureFileFor('readme.md'), '');
+  assert.equal(Core.featureFileFor('features.md'), '');
+  for (const n of ['features.md', '功能清单.md', 'features-a.md', '功能清单-a.md']) assert.ok(Core.FEATURE_FILE_RE.test(n), n);
+  for (const n of ['plan.md', 'features.txt', 'notes.md']) assert.ok(!Core.FEATURE_FILE_RE.test(n), n);
+  assert.ok(!Core.FEATURE_FILE_RE.test('../features.md'));
+
+  for (const [md, word] of [[timerZh, '功能清单'], [timerEn, 'Feature list']]) {
+    const f = Core.makeFeatureList(md);
+    assert.ok(Core.isFeatureList(f));
+    assert.ok(!Core.isFeatureList(md));
+    assert.equal(Core.titleName(f), Core.titleName(md));
+    assert.match(f, new RegExp('^# ' + word));
+    assert.deepEqual(Core.progressList(f).map((x) => [x.no, x.name, x.status]), Core.progressList(md).map((x) => [x.no, x.name, x.status]));
+    // 只带功能，不带别的部分
+    assert.doesNotMatch(f, /^## [^4]/m);
+    // 改名保留标题词
+    assert.match(Core.setTitle(f, 'X'), new RegExp('^# ' + word));
+    assert.equal(Core.docLang(f), Core.docLang(md));
+  }
+  // 功能下已有的问题一起带过去
+  const f0 = Core.issueList(timerZh)[0];
+  const withIssue = Core.addIssue(timerZh, f0.featureLine, '点暂停后数字仍在走', '2026-01-02').md;
+  assert.equal(Core.issueList(Core.makeFeatureList(withIssue))[0].items.length, 1);
+
+  // 开始做：有功能的进度不是未做，或者已有问题
+  assert.equal(Core.workStarted(timerZh), true);
+  const allTodo = timerZh.replace(/进度：[^\n]*/g, '进度：未做');
+  assert.equal(Core.workStarted(allTodo), false);
+  assert.equal(Core.workStarted(Core.addIssue(allTodo, Core.issueList(allTodo)[0].featureLine, '一个问题', '2026-01-02').md), true);
+});

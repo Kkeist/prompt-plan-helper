@@ -38,18 +38,28 @@ function createApp(opts) {
   const root = opts.root;
   const index = LS.get(NS + ':index', null) || { current: '', list: [], open: [] };
   if (!index.open) index.open = [];
+  // 同一个项目有两份文档：初始计划书，和确认开始做之后独立出来的功能清单。
+  // S.md、S.past、S.future 指向正在看的那一份，下面的编辑、撤销都只作用在这一份上。
+  const docs = {
+    plan: { md: '', past: [], future: [] },
+    features: { md: '', past: [], future: [], virtual: false },
+  };
   const S = {
-    md: '',
-    past: [],
-    future: [],
+    doc: 'plan',
+    picked: false,
     collapsed: {},
     view: 'plan',
     project: null,
-    folder: { state: Folder.supported() ? 'none' : 'off', handle: null, name: '', path: '', synced: '', file: PLAN_NAMES[0] },
+    folder: { state: Folder.supported() ? 'none' : 'off', handle: null, name: '', path: '', synced: '', fsynced: '', file: PLAN_NAMES[0] },
     lastSync: '',
     editedAt: 0,
     issueSeen: {},
   };
+  Object.defineProperties(S, {
+    md: { get() { return docs[S.doc].md; }, set(v) { docs[S.doc].md = v; } },
+    past: { get() { return docs[S.doc].past; }, set(v) { docs[S.doc].past = v; } },
+    future: { get() { return docs[S.doc].future; }, set(v) { docs[S.doc].future = v; } },
+  });
   let typingKey = '';
   let typingAt = 0;
   let folderTimer = 0;
@@ -67,15 +77,44 @@ function createApp(opts) {
   const projectKey = (id) => NS + ':p:' + id;
 
   function freshFolder() {
-    return { state: Folder.supported() ? 'none' : 'off', handle: null, name: '', path: '', synced: '', file: PLAN_NAMES[0] };
+    return { state: Folder.supported() ? 'none' : 'off', handle: null, name: '', path: '', synced: '', fsynced: '', file: PLAN_NAMES[0] };
+  }
+
+  function resetDocs(plan, features) {
+    docs.plan = { md: plan || '', past: [], future: [] };
+    docs.features = { md: features || '', past: [], future: [], virtual: false };
+    deriveFeatures();
+    S.doc = docs.features.md.trim() ? 'features' : 'plan';
+    S.picked = false;
+  }
+
+  // 计划书已确认并且已经开始做（有功能的进度不是「未做」，或者功能下已有问题），但还没有功能清单：
+  // 先在页面里生成一份，第一次改动时才真的存成文件。确认之后还没开始做时仍然只是在更新计划书。
+  function deriveFeatures() {
+    const f = docs.features;
+    if (f.md.trim() || Core.getStatus(docs.plan.md) !== 'approved' || !Core.workStarted(docs.plan.md)) return;
+    f.md = Core.makeFeatureList(docs.plan.md);
+    f.virtual = true;
+  }
+
+  // 计划书整份换了或刚确认：已经开始做的就生成功能清单，并先看它
+  function settleDocs() {
+    deriveFeatures();
+    if (docs.features.md.trim()) S.doc = 'features';
+  }
+
+  // 开始做：从计划书生成功能清单，之后的进度、问题和新增的功能都记在功能清单里，计划书不再改
+  function startWork() {
+    if (docs.features.md.trim()) return;
+    docs.features = { md: Core.makeFeatureList(docs.plan.md), past: [], future: [], virtual: false };
+    S.doc = 'features';
+    S.picked = true;
   }
 
   function loadProject(id) {
     const rec = LS.get(projectKey(id), null) || {};
-    S.md = rec.md || '';
+    resetDocs(rec.md, rec.fmd);
     S.editedAt = rec.updated || 0;
-    S.past = [];
-    S.future = [];
     S.folder = freshFolder();
   }
 
@@ -84,8 +123,9 @@ function createApp(opts) {
   }
 
   function persist() {
-    if (!LS.set(projectKey(S.project.id), { md: S.md, updated: S.editedAt || 0 })) toast(t('browser_storage_is_full_and_the_latest'));
-    const nm = Core.titleName(S.md);
+    const f = docs.features;
+    if (!LS.set(projectKey(S.project.id), { md: docs.plan.md, fmd: f.virtual ? '' : f.md, updated: S.editedAt || 0 })) toast(t('browser_storage_is_full_and_the_latest'));
+    const nm = Core.titleName(docs.plan.md);
     if (nm && S.project.name !== nm) {
       S.project.name = nm;
       saveIndex();
@@ -111,7 +151,7 @@ function createApp(opts) {
     if (SERVER && !opts.folder && (new URLSearchParams(location.search).get('view') === 'hub' || WINDOW_MODE)) {
       S.view = 'hub';
       // 还没写过内容、也没连文件夹的空项目不占标签
-      if (!S.md.trim() && !S.project.path) {
+      if (!docs.plan.md.trim() && !S.project.path) {
         index.open = index.open.filter((id) => id !== S.project.id);
         saveIndex();
       }
@@ -204,6 +244,7 @@ function createApp(opts) {
   function commit(md, raw) {
     const next = raw ? md : autoStatus(md);
     if (next === S.md) return;
+    if (S.doc === 'features') docs.features.virtual = false;
     S.past.push(S.md);
     if (S.past.length > 100) S.past.shift();
     S.future = [];
@@ -222,6 +263,7 @@ function createApp(opts) {
     }
     typingKey = key;
     typingAt = now;
+    if (S.doc === 'features') docs.features.virtual = false;
     S.md = next;
     changed();
     renderStatus();
@@ -268,6 +310,16 @@ function createApp(opts) {
     return { name: names[0], text: null, mtime: 0 };
   }
 
+  // 当前这个计划书文件对应的功能清单文件
+  const featureFile = () => Core.featureFileFor(S.folder.file);
+
+  async function findFeatures() {
+    const name = featureFile();
+    if (!name) return { name: '', text: null, mtime: 0 };
+    const got = await Folder.readInfo(S.folder.handle, [], name);
+    return { name, text: got ? got.text : null, mtime: got ? got.mtime : 0 };
+  }
+
   async function folderInit() {
     if (!Folder.supported()) return;
     const pid = S.project.id;
@@ -295,6 +347,7 @@ function createApp(opts) {
     S.folder.path = handle.server ? handle.root : '';
     S.folder.state = 'ready';
     S.folder.synced = '';
+    S.folder.fsynced = '';
     renderAll();
     await folderPull(true, false);
   }
@@ -421,7 +474,12 @@ function createApp(opts) {
         const found = await findPlan(S.folder.handle);
         S.folder.file = found.name;
         S.folder.synced = found.text;
-        commit(found.text, true);
+        commitTo('plan', found.text);
+        S.folder.fsynced = '';
+        docs.features = { md: '', past: [], future: [], virtual: false };
+        deriveFeatures();
+        await pullDoc('features', false, true);
+        S.doc = docs.features.md.trim() ? 'features' : 'plan';
         S.lastSync = clockText();
         renderAll();
         toast(t('loaded_the_plan_from_the_folder'), { label: t('undo'), run: () => undo() });
@@ -486,11 +544,10 @@ function createApp(opts) {
     if (S.folder.state === 'ready') await folderPush();
     S.project.file = file;
     saveIndex();
-    S.md = '';
-    S.past = [];
-    S.future = [];
+    resetDocs('', '');
     S.folder.file = file;
     S.folder.synced = '';
+    S.folder.fsynced = '';
     try {
       await Api.call('POST', '/api/current', { path: S.folder.path, file });
     } catch (e) {
@@ -604,66 +661,125 @@ function createApp(opts) {
     toast(t('folder_disconnected'));
   }
 
-  async function folderPush() {
-    if (S.folder.state !== 'ready' || !S.md.trim()) return;
-    const text = S.md;
-    if (text === S.folder.synced) return;
+  // 历史版本：功能清单被改写之前，把旧的一份存进文件夹里的 .shupian/history/；
+  // 平时隔几分钟存一份，有功能被去掉时马上存，防止写过的功能找不回来
+  const HISTORY_GAP = 5 * 60 * 1000;
+  const HISTORY_KEEP = 50;
+  let historyAt = 0;
+
+  const featureNames = (md) => Core.progressList(md).map((x) => x.name);
+
+  async function keepVersion(prev, next) {
+    if (!prev || !prev.trim() || prev === next || !S.folder.handle) return;
+    const lost = featureNames(prev).some((n) => featureNames(next).indexOf(n) < 0);
+    if (!lost && Date.now() - historyAt < HISTORY_GAP) return;
+    const name = Core.timeStamp() + '-' + featureFile();
     try {
-      await Folder.write(S.folder.handle, [], S.folder.file, text);
-      S.folder.synced = text;
+      await Folder.write(S.folder.handle, ['.shupian', 'history'], name, prev);
+      if (!S.folder.handle.server) await Folder.historyPrune(S.folder.handle, featureFile(), HISTORY_KEEP);
+      historyAt = Date.now();
+    } catch (e) {
+      toast(t('could_not_save_the_history_why', { why: errText(e) }));
+    }
+  }
+
+  // kind：plan 或 features
+  async function pushDoc(kind) {
+    const d = docs[kind];
+    if (!d.md.trim() || d.virtual) return;
+    const key = kind === 'plan' ? 'synced' : 'fsynced';
+    const file = kind === 'plan' ? S.folder.file : featureFile();
+    if (!file || d.md === S.folder[key]) return;
+    try {
+      if (kind === 'features') await keepVersion(S.folder.fsynced, d.md);
+      await Folder.write(S.folder.handle, [], file, d.md);
+      S.folder[key] = d.md;
     } catch (e) {
       toast(t('could_not_save_to_the_folder_why', { why: errText(e) }));
     }
   }
 
-  // silent：自动检查时不弹提示；有文字框正在编辑时不替换页面
-  async function folderPull(manual, silent) {
+  async function folderPush() {
     if (S.folder.state !== 'ready') return;
+    await pushDoc('plan');
+    await pushDoc('features');
+  }
+
+  // 在某一份文档上提交（拉取回来的内容放进对应那一份的撤销记录里）
+  function commitTo(kind, md) {
+    const keep = S.doc;
+    S.doc = kind;
+    commit(md, true);
+    S.doc = keep;
+  }
+
+  // 有文字框正在编辑时，自动检查不替换页面
+  const editing = () => !!body.querySelector('textarea');
+
+  // 把文件夹里的一份读回来：kind 是 plan 或 features；返回 true 表示页面内容变了
+  async function pullDoc(kind, manual, silent) {
+    const d = docs[kind];
+    const key = kind === 'plan' ? 'synced' : 'fsynced';
     let found;
     try {
-      found = await findPlan(S.folder.handle);
+      found = kind === 'plan' ? await findPlan(S.folder.handle) : await findFeatures();
     } catch (e) {
       if (!silent) toast(t('could_not_read_the_folder_why', { why: errText(e) }));
-      return;
+      return false;
     }
-    S.folder.file = found.name;
+    if (kind === 'plan') S.folder.file = found.name;
     const text = found.text;
+    const mine = d.virtual ? '' : d.md;
     if (text == null) {
-      if (S.md.trim()) await folderPush();
-      else if (manual) toast(t('there_is_no_plan_in_the_folder_yet'));
-      return;
+      if (mine.trim()) await pushDoc(kind);
+      else if (manual && kind === 'plan' && !d.md.trim()) toast(t('there_is_no_plan_in_the_folder_yet'));
+      return false;
     }
-    if (text === S.md) {
-      S.folder.synced = text;
-      if (manual) toast(t('already_up_to_date'));
-      return;
+    if (text === mine) {
+      S.folder[key] = text;
+      if (manual && kind === 'plan') toast(t('already_up_to_date'));
+      return false;
     }
     // 文件夹里是空的：空的不算最新，保留页面里的并写回去
-    if (!text.trim() && S.md.trim()) { S.folder.synced = text; await folderPush(); return; }
-    if (!S.md.trim() || S.md === S.folder.synced) {
-      if (silent && body.querySelector('textarea')) return;
-      S.folder.synced = text;
-      commit(text, true);
+    if (!text.trim() && mine.trim()) { S.folder[key] = text; await pushDoc(kind); return false; }
+    if (!mine.trim() || mine === S.folder[key]) {
+      if (silent && editing()) return false;
+      if (kind === 'features') await keepVersion(mine || S.folder[key], text);
+      S.folder[key] = text;
+      d.virtual = false;
+      commitTo(kind, text);
       S.editedAt = found.mtime || 0;
       persist();
       S.lastSync = clockText();
-      renderAll();
-      if (!silent) toast(t('loaded_the_plan_from_the_folder'), { label: t('undo'), run: () => { undo(); folderPush(); } });
-      return;
+      if (!silent) toast(kind === 'plan' ? t('loaded_the_plan_from_the_folder') : t('loaded_the_feature_list_from_the_folder'), { label: t('undo'), run: () => { undo(); folderPush(); } });
+      return true;
     }
-    if (text === S.folder.synced) { await folderPush(); return; }
-    if (silent && body.querySelector('textarea')) return;
+    if (text === S.folder[key]) { await pushDoc(kind); return false; }
+    if (silent && editing()) return false;
     // 两边都改过：不问，按先后合并。改在不同位置的都保留，改在同一位置的用较新的那一份。
     const remoteNewer = (found.mtime || 0) > (S.editedAt || 0);
-    const merged = Core.merge3(S.folder.synced, S.md, text, remoteNewer ? 'theirs' : 'mine');
-    S.folder.synced = text;
-    commit(merged.text, true);
+    const merged = Core.merge3(S.folder[key], mine, text, remoteNewer ? 'theirs' : 'mine');
+    if (kind === 'features') await keepVersion(mine, merged.text);
+    S.folder[key] = text;
+    commitTo(kind, merged.text);
     S.editedAt = Date.now();
     S.lastSync = clockText();
-    renderAll();
-    if (merged.text !== text) await folderPush();
+    if (merged.text !== text) await pushDoc(kind);
     toast(merged.conflicts ? t('both_the_folder_and_the_page_changed_merged', { n: merged.conflicts }) : t('both_the_folder_and_the_page_changed_merged_2'),
       { label: t('undo'), run: () => { undo(); folderPush(); } });
+    return true;
+  }
+
+  // silent：自动检查时不弹提示。先读计划书，再读它的功能清单
+  async function folderPull(manual, silent) {
+    if (S.folder.state !== 'ready') return;
+    const a = await pullDoc('plan', manual, silent);
+    deriveFeatures();
+    const b = await pullDoc('features', manual, silent);
+    // 还没自己选过看哪一份时，有功能清单就先看功能清单
+    if (!S.picked && S.doc === 'plan' && docs.features.md.trim()) S.doc = 'features';
+    if (S.doc === 'features' && !docs.features.md.trim()) S.doc = 'plan';
+    if (a || b || !silent) renderAll();
   }
 
   function clockText() {
@@ -807,14 +923,16 @@ function createApp(opts) {
   }
 
   // 点一下变成大填写框，点框外保存
-  function makeBox(line, sec, nums) {
-    const el = h('div', { class: 'box', 'data-line': line, tabindex: 0, role: 'button', 'aria-label': t('click_to_edit') });
+  // readonly：初始计划书只读，不能点开编辑
+  function makeBox(line, sec, nums, readonly) {
+    const el = h('div', Object.assign({ class: 'box' + (readonly ? ' readonly' : ''), 'data-line': line }, readonly ? {} : { tabindex: 0, role: 'button', 'aria-label': t('click_to_edit') }));
     const at = () => Number(el.getAttribute('data-line'));
     const paint = () => {
       clear(el);
       const text = Core.bodyText(Core.split(S.md), at());
-      if (!text.trim()) el.append(h('div', { class: 'hint-note' }, t('click_to_fill_in')), h('pre', { class: 'hint-lines', text: sectionHint(S.md, sec) }));
-      else el.append(renderLines(text, nums, docLangOf(S.md)));
+      if (!text.trim()) {
+        if (!readonly) el.append(h('div', { class: 'hint-note' }, t('click_to_fill_in')), h('pre', { class: 'hint-lines', text: sectionHint(S.md, sec) }));
+      } else el.append(renderLines(text, nums, docLangOf(S.md)));
     };
     const edit = () => {
       if (el.querySelector('textarea')) return;
@@ -837,9 +955,11 @@ function createApp(opts) {
       ta.focus({ preventScroll: true });
       ta.setSelectionRange(ta.value.length, ta.value.length);
     };
-    el.addEventListener('click', (e) => { if (!e.target.closest('button') && !el.querySelector('textarea')) edit(); });
-    el.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); edit(); } });
-    el.edit = edit;
+    if (!readonly) {
+      el.addEventListener('click', (e) => { if (!e.target.closest('button') && !el.querySelector('textarea')) edit(); });
+      el.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); edit(); } });
+      el.edit = edit;
+    }
     paint();
     return el;
   }
@@ -988,13 +1108,17 @@ function createApp(opts) {
     setTimeout(() => input.focus({ preventScroll: true }), 0);
   }
 
-  // 项目情况（计划书阶段）和功能清单（确认之后）：每个功能做什么、做到哪一步，以及它下面的问题
+  // 开始做之后有功能清单，初始计划书不再改，只读
+  const planLocked = () => S.doc === 'plan' && docs.features.md.trim() !== '';
+
+  // 项目情况（计划书阶段）和功能清单（开始做之后）：每个功能做什么、做到哪一步，以及它下面的问题
   function renderProgress() {
+    if (planLocked()) return null;
     const list = Core.progressList(S.md);
     if (!list.length) return null;
     const lang = docLangOf(S.md);
     const W = Core.WORDS[lang].progress;
-    const building = Core.getStatus(S.md) === 'approved';
+    const building = S.doc === 'features';
     const issues = Core.issueList(S.md);
     const done = list.filter((x) => x.status === 'done').length;
     const doing = list.filter((x) => x.status === 'doing').length;
@@ -1011,7 +1135,16 @@ function createApp(opts) {
     list.forEach((f) => {
       const chip = h('button', { type: 'button', class: 'prog ' + f.status, title: t('click_to_change_progress') }, W[f.status]);
       chip.addEventListener('click', () => {
-        commit(Core.setProgress(S.md, f.line, Core.nextProgress(f.status)), true);
+        const next = Core.nextProgress(f.status);
+        // 计划书已确认后第一次改进度就是开始做了：生成功能清单，进度记在功能清单里
+        if (S.doc === 'plan' && Core.getStatus(S.md) === 'approved') {
+          startWork();
+          const hit = Core.progressList(S.md).filter((x) => x.no === f.no && x.name === f.name)[0];
+          if (hit) commit(Core.setProgress(S.md, hit.line, next), true);
+          renderAll();
+          return;
+        }
+        commit(Core.setProgress(S.md, f.line, next), true);
         renderAll();
       });
       const mine = (issues.filter((x) => x.featureLine === f.line)[0] || { items: [] }).items;
@@ -1050,15 +1183,32 @@ function createApp(opts) {
     const nums = headingNumbers(lines);
     const hs = Core.headings(lines);
     const lang = docLangOf(S.md);
-    const building = Core.getStatus(S.md) === 'approved';
-    let stageShown = false;
+    const locked = planLocked();
+    const inFeatures = S.doc === 'features';
     const doc = h('div', { class: 'doc' });
     const title = hs.filter((x) => x.level === 1)[0];
     if (title) {
       const nm = Core.titleName(S.md);
-      const nameBtn = h('button', { type: 'button', class: 'title', 'data-line': title.line, title: t('click_to_rename') }, nm || t('untitled_project'));
-      nameBtn.addEventListener('click', () => renameInline(nameBtn, nm, (v) => { if (v.trim()) commit(Core.setTitle(S.md, v)); }));
-      doc.append(h('h1', null, nameBtn));
+      if (locked || inFeatures) {
+        doc.append(h('h1', null, h('span', { class: 'title', 'data-line': title.line }, nm || t('untitled_project'))));
+      } else {
+        const nameBtn = h('button', { type: 'button', class: 'title', 'data-line': title.line, title: t('click_to_rename') }, nm || t('untitled_project'));
+        nameBtn.addEventListener('click', () => renameInline(nameBtn, nm, (v) => { if (v.trim()) commit(Core.setTitle(S.md, v)); }));
+        doc.append(h('h1', null, nameBtn));
+      }
+    }
+    if (docs.features.md.trim()) {
+      const tabs = h('div', { class: 'doctabs', role: 'tablist' });
+      [['features', t('feature_list')], ['plan', t('initial_plan')]].forEach(([kind, label]) => {
+        const on = S.doc === kind;
+        tabs.append(h('button', { type: 'button', role: 'tab', class: 'chip' + (on ? ' on' : ''), 'aria-selected': on ? 'true' : 'false', onclick() {
+          if (on) return;
+          S.doc = kind;
+          S.picked = true;
+          renderAll();
+        } }, label));
+      });
+      doc.append(tabs);
     }
     doc.append(h('div', { class: 'statusline' }));
     const prog = renderProgress();
@@ -1066,12 +1216,8 @@ function createApp(opts) {
     let secBody = null;
     hs.forEach((x, idx) => {
       if (x.level === 2) {
-        if (building && !stageShown) {
-          stageShown = true;
-          doc.append(h('h2', { class: 'stage', text: t('plan_initial_version') }));
-        }
         const no = (/^(\d+)\b/.exec(x.body) || [])[1] || '';
-        const closedNow = S.collapsed[x.body] !== undefined ? S.collapsed[x.body] : Core.getStatus(S.md) === 'approved';
+        const closedNow = S.collapsed[x.body] !== undefined ? S.collapsed[x.body] : (inFeatures || locked);
         const secEl = h('section', { class: 'sec' + (closedNow ? ' closed' : ''), 'data-line': x.line, 'data-no': no });
         const fold = h('button', { type: 'button', class: 'fold', 'aria-label': t('expand_or_collapse') }, closedNow ? '▸' : '▾');
         fold.addEventListener('click', () => {
@@ -1085,8 +1231,8 @@ function createApp(opts) {
         secEl.append(secBody);
         const next = hs[idx + 1];
         const hasChildren = next && next.level >= 3;
-        if (!hasChildren || Core.bodyText(lines, x.line).trim() !== '') secBody.append(makeBox(x.line, no, nums));
-        if (ADD_LABEL[no]) {
+        if (!hasChildren || Core.bodyText(lines, x.line).trim() !== '') secBody.append(makeBox(x.line, no, nums, locked));
+        if (ADD_LABEL[no] && !locked) {
           const slot = no === '2'
             ? h('div', { class: 'addslot' }, h('button', { type: 'button', class: 'btn', onclick() {
               const r = Core.addFlowLine(S.md);
@@ -1108,18 +1254,22 @@ function createApp(opts) {
         const sec = (/^(\d+)\./.exec(no) || [])[1] || '';
         const card = h('div', { class: 'blk', 'data-line': x.line, 'data-no': no });
         const titleText = x.body.replace(/^\d+\.\d+\s*/, '');
-        const nameBtn = h('button', { type: 'button', class: 'blk-title', title: t('click_to_rename') },
-          h('span', { class: 'no', text: no }), titleText && !/〈/.test(titleText) ? h('span', { text: titleText }) : h('span', { class: 'ph', text: t('name') }));
-        nameBtn.addEventListener('click', () => renameInline(nameBtn, titleText, (v) => {
-          const r = Core.renameBlock(S.md, Number(card.getAttribute('data-line')), v);
-          if (r.ok) commit(r.md); else toast(nameError(r.code, sec === '3' ? 'page' : 'feature'));
-        }));
-        const del = h('button', { type: 'button', class: 'x', title: t('delete'), 'aria-label': t('delete'), onclick() {
-          commit(Core.join(Core.deleteSubtree(Core.split(S.md), Number(card.getAttribute('data-line')))));
-          renderAll();
-          toast(t('deleted'), { label: t('undo'), run: () => undo() });
-        } }, '✕');
-        card.append(h('div', { class: 'blk-head' }, nameBtn, del), makeBox(x.line, sec, nums));
+        const nameParts = [h('span', { class: 'no', text: no }), titleText && !/〈/.test(titleText) ? h('span', { text: titleText }) : h('span', { class: 'ph', text: t('name') })];
+        if (locked) {
+          card.append(h('div', { class: 'blk-head' }, h('span', { class: 'blk-title' }, nameParts)), makeBox(x.line, sec, nums, true));
+        } else {
+          const nameBtn = h('button', { type: 'button', class: 'blk-title', title: t('click_to_rename') }, nameParts);
+          nameBtn.addEventListener('click', () => renameInline(nameBtn, titleText, (v) => {
+            const r = Core.renameBlock(S.md, Number(card.getAttribute('data-line')), v);
+            if (r.ok) commit(r.md); else toast(nameError(r.code, sec === '3' ? 'page' : 'feature'));
+          }));
+          const del = h('button', { type: 'button', class: 'x', title: t('delete'), 'aria-label': t('delete'), onclick() {
+            commit(Core.join(Core.deleteSubtree(Core.split(S.md), Number(card.getAttribute('data-line')))));
+            renderAll();
+            toast(t('deleted'), { label: t('undo'), run: () => undo() });
+          } }, '✕');
+          card.append(h('div', { class: 'blk-head' }, nameBtn, del), makeBox(x.line, sec, nums));
+        }
         const slot = secBody.querySelector('.addslot');
         if (slot) secBody.insertBefore(card, slot); else secBody.append(card);
       }
@@ -1166,6 +1316,7 @@ function createApp(opts) {
   }
 
   function importText(text) {
+    S.doc = 'plan';
     const txt = text.replace(/\r\n?/g, '\n');
     if (!/^##\s+\d/m.test(txt)) {
       const wrapped = Core.wrapUnrecognised(txt, S.project.name, LANG, Core.today());
@@ -1175,18 +1326,22 @@ function createApp(opts) {
       return;
     }
     commit(txt, true);
+    settleDocs();
     renderAll();
     toast(t('plan_imported'), { label: t('undo'), run: () => undo() });
   }
 
   function newBlank() {
+    S.doc = 'plan';
     commit(Core.blankPlan(SCHEMA[LANG].planTemplate, S.project.name === t('new_project') ? '' : S.project.name, Core.today()), true);
     renderAll();
     toast(t('new_plan_created'), { label: t('undo'), run: () => undo() });
   }
 
   function loadExample() {
+    S.doc = 'plan';
     commit(SCHEMA[LANG].example, true);
+    settleDocs();
     renderAll();
     toast(t('example_loaded'), { label: t('undo'), run: () => undo() });
   }
@@ -1225,16 +1380,24 @@ function createApp(opts) {
     if (!box) return;
     clear(box);
     const lang = docLangOf(S.md);
-    const code = Core.getStatus(S.md) || 'doing';
+    const inFeatures = S.doc === 'features';
+    const locked = planLocked();
+    const code = inFeatures ? '' : Core.getStatus(S.md) || 'doing';
     const n = Core.countPending(S.md);
-    box.append(h('span', { class: 'state' + (code === 'approved' ? ' pass' : ''), text: code === 'approved' ? t('initial_plan_approved') : Core.statusLabel(code, lang) }));
-    if (n > 0) box.append(h('button', { type: 'button', class: 'btn sm', onclick: pendJump }, t('n_left_to_fill_in', { n })));
-    else box.append(h('span', { class: 'muted', text: t('nothing_left_to_fill_in') }));
-    if (code !== 'approved') {
+    if (!inFeatures) {
+      const label = code === 'approved' ? (locked ? t('initial_plan_approved') : t('plan_confirmed')) : Core.statusLabel(code, lang);
+      box.append(h('span', { class: 'state' + (code === 'approved' ? ' pass' : ''), text: label }));
+    }
+    if (!locked && !(inFeatures && n === 0)) {
+      if (n > 0) box.append(h('button', { type: 'button', class: 'btn sm', onclick: pendJump }, t('n_left_to_fill_in', { n })));
+      else box.append(h('span', { class: 'muted', text: t('nothing_left_to_fill_in') }));
+    }
+    if (!inFeatures && code !== 'approved') {
       box.append(h('button', { type: 'button', class: 'btn sm primary', onclick() {
         const r = Core.markPassed(S.md);
         if (!r.ok) { toast(t('n_still_to_fill_in_fill_them_in_before', { n: r.pending })); return; }
         commit(r.md, true);
+        settleDocs();
         renderAll();
         toast(t('the_plan_is_confirmed_work_can_start'));
       } }, t('confirm_and_start')));
@@ -1267,6 +1430,51 @@ function createApp(opts) {
     });
   }
 
+  // 历史版本：功能清单每次被改写之前存下的旧版本，可以整份恢复
+  function stampText(name) {
+    const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(name);
+    return m ? m[1] + '-' + m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5] + ':' + m[6] : name;
+  }
+
+  async function openHistory() {
+    let items;
+    try {
+      items = await Folder.historyList(S.folder.handle, featureFile());
+    } catch (e) {
+      toast(t('could_not_read_the_history_why', { why: errText(e) }));
+      return;
+    }
+    if (!items.length) { toast(t('there_are_no_earlier_versions_yet')); return; }
+    const now = featureNames(S.md);
+    const rows = h('div', { class: 'hist' });
+    const modal = kit.openModal({
+      title: t('earlier_versions'),
+      body: rows,
+      foot: (close) => [h('button', { type: 'button', class: 'btn', onclick: close }, t('close'))],
+    });
+    for (const it of items) {
+      let text;
+      try {
+        text = await Folder.read(S.folder.handle, ['.shupian', 'history'], it.name);
+      } catch (e) {
+        toast(t('could_not_read_the_history_why', { why: errText(e) }));
+        return;
+      }
+      if (text == null) continue;
+      const lost = featureNames(text).filter((n) => now.indexOf(n) < 0);
+      rows.append(h('div', { class: 'hist-row' },
+        h('div', { class: 'hist-info' },
+          h('div', { text: stampText(it.name) }),
+          lost.length ? h('div', { class: 'muted', text: t('removed_features_names', { names: lost.join(LOCALES[LANG].doc.listSep) }) }) : null),
+        h('button', { type: 'button', class: 'btn sm', onclick() {
+          modal.close();
+          commit(text, true);
+          renderAll();
+          toast(t('restored_the_version', { time: stampText(it.name) }), { label: t('undo'), run: () => undo() });
+        } }, t('restore'))));
+    }
+  }
+
   function openMenu(anchor) {
     kit.openPop(anchor, (pop) => {
       const add = (l, run, ex) => pop.append(kit.popItem(l, run, ex));
@@ -1278,8 +1486,11 @@ function createApp(opts) {
         add(t('copy_prompt'), openAiPrompt);
         add(t('export'), exportPlan);
         pop.append(h('hr'));
-        const keep = Core.hasOriginal(S.md);
-        add(t('keep_the_original_description'), () => setOriginal(!keep), { on: keep });
+        if (S.doc === 'plan') {
+          const keep = Core.hasOriginal(S.md);
+          add(t('keep_the_original_description'), () => setOriginal(!keep), { on: keep, disabled: planLocked() });
+        }
+        if (S.doc === 'features' && f.state === 'ready') add(t('earlier_versions'), openHistory);
         pop.append(h('hr'));
       }
       add(t('view_an_example'), loadExample);

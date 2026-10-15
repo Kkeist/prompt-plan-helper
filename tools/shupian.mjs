@@ -1,12 +1,12 @@
 // 命令行：检查计划书、查看和更新进度、打开桌面窗口。
 // 用法：
 //   node tools/shupian.mjs check [计划书文件]                 状态、待补列表、重名检查
-//   node tools/shupian.mjs progress [计划书文件] [功能名 todo|doing|done]   查看或更新进度
+//   node tools/shupian.mjs progress [计划书文件或功能清单文件] [功能名 todo|doing|done]   查看或更新进度（记在功能清单里）
 //   node tools/shupian.mjs app [hub|plan]                    打开桌面窗口（最近的文件夹，或计划书）
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STATE_FILE } from './app-server.mjs';
 import { T, locales } from './text.mjs';
@@ -28,6 +28,20 @@ function load(arg) {
     process.exit(2);
   }
   return { path, md: readFileSync(path, 'utf8') };
+}
+
+// 开始做之后进度和问题记在功能清单里：给的是功能清单文件就直接用；给的是计划书，已有功能清单就用它，
+// 计划书已通过但还没有功能清单时由计划书生成（第一次写入时才创建文件，计划书从此不再改），没通过就还是计划书
+function loadWork(arg) {
+  const plan = load(arg);
+  const base = basename(plan.path);
+  if (Core.FEATURE_FILE_RE.test(base)) return plan;
+  const name = Core.featureFileFor(base);
+  if (!name) return plan;
+  const path = join(dirname(plan.path), name);
+  if (existsSync(path)) return { path, md: readFileSync(path, 'utf8') };
+  if (Core.getStatus(plan.md) === 'approved') return { path, md: Core.makeFeatureList(plan.md) };
+  return plan;
 }
 
 function check(arg) {
@@ -56,7 +70,7 @@ function progress(args) {
   let file = '';
   let rest = args.slice();
   if (rest.length && /\.md$/i.test(rest[0])) file = rest.shift();
-  const { path, md } = load(file);
+  const { path, md } = loadWork(file);
   const list = Core.progressList(md);
   if (!rest.length) {
     list.forEach((x) => console.log((x.no ? x.no + ' ' : '') + x.name + '　' + x.status + (x.what ? '　' + x.what : '')));
@@ -91,7 +105,7 @@ function issueRows(md) {
 }
 
 function issues(args) {
-  const { md } = load(args[0]);
+  const { md } = loadWork(args[0]);
   const rows = issueRows(md);
   if (!rows.length) { console.log(T('no_issues')); return; }
   const names = issueNames();
@@ -104,7 +118,7 @@ function issue(args) {
   const n = Number(rest[0]);
   const state = rest[1];
   if (['todo', 'doing', 'done'].indexOf(state) < 0) { console.error(T('issue_states')); process.exit(2); }
-  const { path, md } = load(file);
+  const { path, md } = loadWork(file);
   const row = issueRows(md)[n - 1];
   if (!row) { console.error(T('no_such_issue', { n: rest[0] })); process.exit(2); }
   writeFileSync(path, Core.setIssueState(md, row.line, state));

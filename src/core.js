@@ -51,6 +51,8 @@ const ORIGINAL_RE = new RegExp('^' + alt((d) => [d.originalDescription]));
 // 默认的计划书文件名：plan.md、计划书.md；同一个文件夹里的多份是 前缀+名称.md
 const PLAN_NAMES = DOCS.map((d) => d.planFile);
 const FILE_PREFIXES = DOCS.map((d) => d.filePrefix);
+// 功能清单的文件名：features.md、功能清单.md，以及和计划书一一对应的 features-名称.md、功能清单-名称.md
+const FEATURE_FILE_RE = new RegExp('^(?:' + DOCS.map((d) => reEsc(d.featureFile.replace(/\.md$/, ''))).join('|') + ')(?:-[^\\\\/:*?"<>|]{1,60})?\\.md$', 'i');
 // 文件名：plan.md、计划书.md，或同一个文件夹里的 plan-名称.md、计划书-名称.md
 const PLAN_FILE_RE = new RegExp('^(?:' + DOCS.map((d) => reEsc(d.planFile.replace(/\.md$/, ''))).join('|') + ')(?:-[^\\\\/:*?"<>|]{1,60})?\\.md$', 'i');
 
@@ -318,8 +320,15 @@ function setTitle(md, name) {
   const v = String(name || '').trim() || LOC[lang].doc.projectName;
   const sep = WORDS[lang].sep;
   if (i < 0) return '# ' + WORDS[lang].title + sep + v + '\n\n' + md;
-  lines[i] = '# ' + WORDS[lang].title + sep + v;
+  // 功能清单的标题词保留
+  lines[i] = '# ' + (isFeatureList(md) ? LOC[lang].doc.featureList : WORDS[lang].title) + sep + v;
   return join(lines);
+}
+
+// 标题行用的是「功能清单」这个词，就是功能清单文档
+function isFeatureList(md) {
+  const t = split(md).find((l) => /^#\s+/.test(l)) || '';
+  return new RegExp('^#\\s+' + alt((d) => [d.featureList]) + SEPS).test(t);
 }
 
 function numberedName(body) {
@@ -756,6 +765,39 @@ function setOriginal(md, keep, text) {
   return { md: join(lines.slice(0, end).concat(block, tail, lines.slice(end))).replace(/\n{3,}/g, '\n\n'), text: '' };
 }
 
+// ---------- 功能清单：和初始计划书是两份文件 ----------
+
+// 计划书文件名对应的功能清单文件名：plan.md → features.md，计划书-名称.md → 功能清单-名称.md；不是计划书的名字返回空字符串
+function featureFileFor(planFile) {
+  const f = String(planFile || '');
+  if (!PLAN_FILE_RE.test(f)) return '';
+  for (const d of DOCS) {
+    if (f.toLowerCase() === d.planFile.toLowerCase()) return d.featureFile;
+    if (f.toLowerCase().indexOf(d.filePrefix.toLowerCase()) === 0) return d.featurePrefix + f.slice(d.filePrefix.length);
+  }
+  return '';
+}
+
+// 已经开始做：有功能的进度不是「未做」，或者功能下已经有问题
+function workStarted(md) {
+  return progressList(md).some((x) => x.status !== 'todo') || issueList(md).some((f) => f.items.length > 0);
+}
+
+// 第一次开始做的时候：把计划书里的功能（连同每个功能下已有的进度和问题）复制成独立的一份功能清单
+function makeFeatureList(planMd) {
+  const lang = docLang(planMd);
+  const d = LOC[lang].doc;
+  const lines = split(planMd);
+  let from = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const t = info(lines[i]);
+    if (t.kind === 'h' && t.level === 2 && new RegExp('^' + SEC.features + '\\b').test(t.body)) { from = i; break; }
+  }
+  const body = from < 0 ? [] : lines.slice(from, rangeEnd(lines, from));
+  const name = titleName(planMd) || d.projectName;
+  return join(['# ' + d.featureList + d.sep + name, ''].concat(body)).replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
+}
+
 // ---------- 新建、导出 ----------
 
 // template 是 plan.md 的内容；语言按模板自己的语言
@@ -857,5 +899,6 @@ module.exports = {
   titleName, setTitle, structure, nextNumber, checkName,
   progressList, setProgress, nextProgress, issueList, addIssue, addIssues, setIssueDone, setIssueState, nextIssueState, merge3,
   addBlock, renameBlock, addFlowLine, blankPlan, normalizeForExport, hasOriginal, setOriginal,
+  FEATURE_FILE_RE, featureFileFor, makeFeatureList, isFeatureList, workStarted,
   buildAiPrompt, buildFeedback,
 };

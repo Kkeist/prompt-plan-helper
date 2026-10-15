@@ -43,6 +43,14 @@ const MOCK_FS = `
     var p = this.prefix + n;
     return Promise.resolve().then(function () { if (!(p in files) && !(o && o.create)) throw nf(); return new FileH(p); });
   };
+  DirH.prototype.getDirectoryHandle = function (n) { return Promise.resolve(new DirH(this.prefix + n + '/', n)); };
+  DirH.prototype.entries = function () {
+    var prefix = this.prefix;
+    var names = Object.keys(files).filter(function (k) { return k.indexOf(prefix) === 0 && k.slice(prefix.length).indexOf('/') < 0; });
+    var i = 0;
+    return { next: function () { if (i >= names.length) return Promise.resolve({ done: true }); var n = names[i++]; return Promise.resolve({ done: false, value: [n.slice(prefix.length), { kind: 'file' }] }); }, [Symbol.asyncIterator]: function () { return this; } };
+  };
+  DirH.prototype.removeEntry = function (n) { delete files[this.prefix + n]; return Promise.resolve(); };
   DirH.prototype.queryPermission = function () { return Promise.resolve('granted'); };
   DirH.prototype.requestPermission = function () { return Promise.resolve('granted'); };
   window.showDirectoryPicker = function () { return Promise.resolve(new DirH('', '示例项目文件夹')); };
@@ -135,6 +143,45 @@ try {
   await page.click(Q('.tabbar .tab:nth-of-type(2) .tab-x'));
   await page.sleep(300);
   ok('关闭标签', (await H.count('.tabbar .tab')) === 1);
+
+  console.log('确认之后还没开始做：仍然是更新计划书，第一次改进度才有功能清单');
+  const approved = timer.replace(/^状态[：:][^　\r\n]*/m, '状态：已通过');
+  const openNewTab = async (md) => {
+    await page.click(Q('.tabbar .chip.add'));
+    await page.sleep(300);
+    await page.click(btn('导入'));
+    await page.click(Q('.modal textarea'));
+    await page.insert(md);
+    await page.click(Q('.modal-foot button', '导入', true));
+    await page.sleep(400);
+  };
+  const closeNewTab = async () => {
+    await page.click(Q('.tabbar .tab:nth-of-type(2) .tab-x'));
+    await page.sleep(300);
+  };
+  const storeOf = () => page.eval('(function(){var out=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(/:p:/.test(k)){var v=JSON.parse(localStorage.getItem(k));if(/已通过/.test(v.md||""))out.push({fmd:(v.fmd||"").length,md:(v.md||"").length})}}return out})()');
+
+  await openNewTab(approved.replace(/进度[：:][^\r\n]*/g, '进度：未做'));
+  ok('已确认、功能都还没做：仍是项目情况，没有功能清单页签', (await H.text('.status-head h2')) === '项目情况' && !(await H.exists('.doctabs')) && (await H.exists('.statusline .state', '已确认', true)), [await H.text('.status-head h2'), await H.text('.statusline .state')]);
+  ok('这时计划书仍可以直接改', (await H.count('.sec .box[tabindex]')) > 0);
+  await page.click(Q('.status-row .prog', '未做'));
+  await page.sleep(300);
+  ok('第一次改进度：生成功能清单，页面切到功能清单', (await H.exists('.doctabs .chip.on', '功能清单', true)) && /进行中 1/.test((await H.text('.status-head .muted')) || ''), await H.text('.status-head .muted'));
+  const started = await storeOf();
+  ok('功能清单存下来了，计划书的内容没有变', started.length === 1 && started[0].fmd > 0, started);
+  await closeNewTab();
+
+  console.log('旧的单文件计划书（已确认并且已经开始做）：页面里生成功能清单，第一次改动才存成文件');
+  await openNewTab(approved);
+  ok('旧计划书：打开就是功能清单，有功能清单和初始计划书两个页签', (await H.exists('.doctabs .chip.on', '功能清单', true)) && (await H.exists('.doctabs .chip', '初始计划书', true)), await H.text('.doctabs'));
+  const before = (await storeOf()).filter((x) => x.md === approved.length);
+  ok('只看不改：功能清单没有被存成文件，原计划书不动', before.length === 1 && before[0].fmd === 0 && before[0].md > 0, before);
+  await page.click(Q('.status-row .prog', '已完成'));
+  await page.sleep(300);
+  const after = (await storeOf()).filter((x) => x.md === approved.length);
+  ok('第一次改动之后：功能清单才存下来，原计划书不变', after.length === 1 && after[0].fmd > 0 && after[0].md === before[0].md, after);
+  await closeNewTab();
+  ok('关掉这个项目回到第一个标签', (await H.count('.tabbar .tab')) === 1 && /已完成 1 \/ 2/.test((await H.text('.status-head .muted')) || ''), await H.text('.status-head .muted'));
   await page.click(Q('button.lang'));
   ok('语言是下拉，有两项', (await H.count('.pop button')) === 2);
   await page.click(Q('.pop button', 'English', true));
@@ -144,14 +191,57 @@ try {
   await page.click(Q('.pop button', '中文', true));
   await page.sleep(300);
 
-  console.log('确认之后变成功能清单');
+  console.log('最初的描述：开关');
+  await page.click(btn('⋯'));
+  ok('更多里有「保留最初的描述」，当前是开', await H.exists('.pop button.on', '保留最初的描述', true));
+  await page.click(btn('保留最初的描述'));
+  await page.sleep(150);
+  await page.click(btn('⋯'));
+  ok('关掉之后开关显示为关', !(await H.exists('.pop button.on', '保留最初的描述', true)) && (await H.exists('.pop button', '保留最初的描述', true)));
+  await page.key('Escape');
+  await page.sleep(100);
+
+  console.log('有选项的字段：点选，可以多选');
+  const sec7 = '__deep(".sec").filter(function(x){return x.getAttribute("data-no")==="7"})[0]';
+  await page.eval('(function(){var s=' + sec7 + ';s.classList.remove("closed")})()');
+  await page.click(sec7 + '.querySelector(".box")');
+  await page.sleep(200);
+  ok('编辑第 7 部分时，有选项的字段显示一排可点的选项', (await H.count('.optrow')) >= 3, await H.count('.optrow'));
+  const platformRow = '__deep(".optrow").filter(function(r){return r.textContent.indexOf("使用平台")===0})[0]';
+  await page.click(platformRow + '.querySelectorAll(".chip")[2]');
+  await page.sleep(150);
+  const val1 = await page.eval('__deep(".box textarea")[0].value');
+  ok('点一个选项：写进「使用平台」那一行', /使用平台：.*电脑软件/.test(val1), val1.split('\n').filter((l) => /使用平台/.test(l))[0]);
+  await page.click(platformRow + '.querySelectorAll(".chip")[3]');
+  await page.sleep(150);
+  const line2 = (await page.eval('__deep(".box textarea")[0].value')).split('\n').filter((l) => /^使用平台/.test(l))[0];
+  ok('再点一个：新选的和之前选的都在，可以多选', /小程序/.test(line2) && /电脑软件/.test(line2) && /手机应用/.test(line2), line2);
+  await page.click(platformRow + '.querySelectorAll(".chip")[2]');
+  await page.sleep(150);
+  const line3 = (await page.eval('__deep(".box textarea")[0].value')).split('\n').filter((l) => /^使用平台/.test(l))[0];
+  ok('再点已选的：取消，别的不动', !/电脑软件/.test(line3) && /小程序/.test(line3) && /手机应用/.test(line3), line3);
+  ok('点选项时填写框没有退出编辑', (await H.count('.box textarea')) === 1);
+  await page.key('Escape');
+  await page.sleep(150);
+  await page.resize(1280, 800);
+
+  console.log('确认：计划书里已经有进度，确认之后直接是功能清单');
   await page.click(Q('.statusline .btn.primary'));
   await page.sleep(300);
-  ok('状态变成初版已确认', /初版已确认/.test((await H.text('.state')) || ''));
-  ok('项目情况变成功能清单', (await H.text('.status-head h2')) === '功能清单');
-  ok('各部分默认收起', (await H.count('.sec.closed')) >= 5, await H.count('.sec.closed'));
+  ok('确认之后：已经开始做，出现功能清单和初始计划书两个页签，先看功能清单', (await H.exists('.doctabs .chip.on', '功能清单', true)) && (await H.exists('.doctabs .chip', '初始计划书', true)), await H.text('.doctabs'));
+  ok('标题变成功能清单', (await H.text('.status-head h2')) === '功能清单');
+  await page.click(Q('.status-row .prog', '进行中'));
+  await page.sleep(300);
+  ok('进度改在功能清单里', /已完成 2 \/ 2/.test((await H.text('.status-head .muted')) || ''), await H.text('.status-head .muted'));
+  ok('各部分默认收起', (await H.count('.sec.closed')) >= 1, await H.count('.sec.closed'));
   ok('每个功能旁有 ＋', (await H.count('.status-row .btn.sm', '＋')) === 2);
   await page.shot(join(shots, '03-功能清单-1280.png'));
+  await page.click(Q('.doctabs .chip', '初始计划书', true));
+  await page.sleep(300);
+  ok('初始计划书只读：没有项目情况框、没有加功能、块不能点开', !(await H.exists('.status-box')) && !(await H.exists('.addslot')) && (await H.count('.box.readonly')) > 0 && (await H.count('.box[tabindex]')) === 0);
+  ok('初始计划书的状态是初版已确认', await H.exists('.statusline .state', '初版已确认', true), await H.text('.statusline .state'));
+  await page.click(Q('.doctabs .chip', '功能清单', true));
+  await page.sleep(300);
 
   console.log('写问题的小弹窗');
   await page.click(Q('.status-row .btn.sm', '＋'));
@@ -174,7 +264,7 @@ try {
   await page.click(Q('.modal-foot button', '添加', true));
   await page.sleep(300);
   ok('问题出现在功能清单里', await H.exists('.issue .issue-text', '点暂停后数字仍在走'));
-  ok('记问题之后仍是功能清单，状态没有退回整理中', (await H.text('.status-head h2')) === '功能清单' && (await H.exists('.statusline .state', '初版已确认', true)), [await H.text('.status-head h2'), await H.text('.statusline .state')]);
+  ok('记问题之后仍是功能清单，没有回到整理中', (await H.text('.status-head h2')) === '功能清单' && !(await H.exists('.statusline .state')), [await H.text('.status-head h2'), await H.text('.statusline .state')]);
   ok('未处理的问题计数', /未处理的问题 1 条/.test((await H.text('.status-head .muted')) || ''));
   await page.click(Q('.issue .istate', '待处理', true));
   await page.sleep(200);
@@ -213,47 +303,49 @@ try {
   const order = JSON.parse(await page.eval('JSON.stringify(__deep(".status-row, .issue").map(function(e){return e.className.indexOf("issue")>=0?"问题":"功能"}))'));
   ok('4.1 下面一条、4.2 下面三条（含之前已修的）', order.join('') === '功能问题功能问题问题问题', order.join(','));
 
-  console.log('确认之后：计划书是初版，后面的修改记在功能清单里');
-  ok('状态标签是「初版已确认」', await H.exists('.statusline .state', '初版已确认', true), await H.text('.statusline .state'));
-  ok('分节上面有「计划书（初版）」', await H.exists('.doc h2.stage', '计划书（初版）', true));
+  console.log('开始做之后：新增的功能记在功能清单里');
   await page.click(Q('.status-head .btn.sm', '＋ 加功能', true));
   await page.click(Q('.modal input'));
   await page.insert('导出分享');
   await page.click(Q('.modal-foot button', '添加', true));
   await page.sleep(400);
   ok('加功能：功能清单里多了一项', await H.exists('.status-row .ref', '4.3 导出分享'), await H.text('.status-box'));
-  ok('加功能：状态仍是初版已确认', await H.exists('.statusline .state', '初版已确认', true));
+  ok('加功能：仍是功能清单', (await H.text('.status-head h2')) === '功能清单');
   ok('加功能：直接进入编辑', (await H.count('.box textarea')) === 1);
   await page.key('Escape');
   await page.sleep(150);
 
-  console.log('最初的描述：开关');
-  await page.click(btn('⋯'));
-  ok('更多里有「保留最初的描述」，当前是开', await H.exists('.pop button.on', '保留最初的描述', true));
-  await page.click(btn('保留最初的描述'));
-  await page.sleep(150);
-  await page.click(btn('⋯'));
-  ok('关掉之后开关显示为关', !(await H.exists('.pop button.on', '保留最初的描述', true)) && (await H.exists('.pop button', '保留最初的描述', true)));
-  await page.key('Escape');
-  await page.sleep(100);
   console.log('浏览器文件夹：连接、保存、自动读回');
   await page.click(btn('⋯'));
   await page.click(btn('连接文件夹'));
   await H.wait(async () => (await page.eval('Object.keys(__fs).length')) > 0, 30);
   const saved = await page.eval('__fs["plan.md"] || ""');
-  ok('计划书写进了文件夹（plan.md），带问题', /进度：已完成/.test(saved) && /已修：点暂停后数字仍在走/.test(saved), saved.slice(0, 80));
+  const savedF = await page.eval('__fs["features.md"] || ""');
+  ok('初始计划书和功能清单是文件夹里的两个文件', /已通过/.test(saved) && /^# 功能清单/.test(savedF), [saved.slice(0, 40), savedF.slice(0, 40)]);
+  ok('功能清单（features.md）带进度和问题', /进度：已完成/.test(savedF) && /已修：点暂停后数字仍在走/.test(savedF), savedF.slice(0, 80));
+  ok('初始计划书里没有记下后来的问题', !/已修：/.test(saved) && !/导出分享/.test(saved), saved.slice(-80));
   ok('关掉开关之后，写进文件夹的计划书没有最初的描述', !/最初的描述/.test(saved), saved.slice(-80));
-  await page.eval('__fs["plan.md"] = __fs["plan.md"].replace(/(### 4\\.2[\\s\\S]*?进度：)[^\\n]*/, "$1已完成")');
+  await page.eval('__fs["features.md"] = __fs["features.md"].replace(/(### 4\\.2[\\s\\S]*?进度：)[^\\n]*/, "$1未做")');
   const t0 = Date.now();
-  await H.wait(async () => /已完成 2 \/ 3/.test((await H.text('.status-head .muted')) || ''), 80);
-  ok('文件夹里的进度一改，页面几秒内自动更新', /已完成 2 \/ 3/.test((await H.text('.status-head .muted')) || '') && Date.now() - t0 < 6500, Date.now() - t0);
+  await H.wait(async () => /已完成 1 \/ 3/.test((await H.text('.status-head .muted')) || ''), 80);
+  ok('文件夹里的进度一改，页面几秒内自动更新', /已完成 1 \/ 3/.test((await H.text('.status-head .muted')) || '') && Date.now() - t0 < 6500, Date.now() - t0);
   // 没有变化就不写文件；文件夹里被清空不算最新
   const w0 = await page.eval('window.__writes || 0');
   await page.sleep(4200);
   ok('没有改动时不重复写文件', (await page.eval('window.__writes || 0')) === w0, [w0, await page.eval('window.__writes || 0')]);
-  await page.eval('__fs["plan.md"] = ""');
-  await H.wait(async () => (await page.eval('(__fs["plan.md"] || "").length')) > 50, 90);
-  ok('文件夹里的计划书被清空：页面内容保留，并写回文件夹', (await page.eval('(__fs["plan.md"] || "").length')) > 50 && (await H.exists('.status-head h2')), await page.eval('(__fs["plan.md"] || "").length'));
+  await page.eval('__fs["features.md"] = ""');
+  await H.wait(async () => (await page.eval('(__fs["features.md"] || "").length')) > 50, 90);
+  ok('文件夹里的功能清单被清空：页面内容保留，并写回文件夹', (await page.eval('(__fs["features.md"] || "").length')) > 50 && (await H.exists('.status-head h2')), await page.eval('(__fs["features.md"] || "").length'));
+  const hist = await page.eval('Object.keys(__fs).filter(function(k){return /^\\.shupian\\/history\\//.test(k)}).length');
+  ok('功能清单被改写之前，旧的一份存进了历史版本', hist >= 1, await page.eval('Object.keys(__fs)'));
+  await page.click(btn('⋯'));
+  await page.click(btn('历史版本'));
+  await H.wait(async () => H.exists('.hist-row'), 40);
+  ok('历史版本弹窗列出旧版本，每条有恢复按钮', (await H.count('.hist-row')) >= 1 && (await H.exists('.hist-row button', '恢复', true)), await H.text('.modal'));
+  await page.shot(join(shots, '06-历史版本-1280.png'));
+  await page.click(Q('.hist-row button', '恢复', true));
+  await page.sleep(300);
+  ok('恢复之后弹窗关闭，仍是功能清单', !(await H.exists('.modal')) && (await H.text('.status-head h2')) === '功能清单', await H.text('.status-head h2'));
 
   console.log('各屏幕宽度');
   for (const [w, hh] of [[1280, 800], [820, 1100], [390, 844], [320, 640], [280, 560]]) {
@@ -279,30 +371,6 @@ try {
   ok('点击后页面位置不变（不跳到框底部）', Math.abs(ja.st - jb.st) <= 1 && Math.abs(ja.top - jb.top) <= 1, { before: jb.st, after: ja.st });
   await page.key('Escape');
   await page.sleep(150);
-
-  console.log('有选项的字段：点选，可以多选');
-  const sec7 = '__deep(".sec").filter(function(x){return x.getAttribute("data-no")==="7"})[0]';
-  await page.eval('(function(){var s=' + sec7 + ';s.classList.remove("closed")})()');
-  await page.click(sec7 + '.querySelector(".box")');
-  await page.sleep(200);
-  ok('编辑第 7 部分时，有选项的字段显示一排可点的选项', (await H.count('.optrow')) >= 3, await H.count('.optrow'));
-  const platformRow = '__deep(".optrow").filter(function(r){return r.textContent.indexOf("使用平台")===0})[0]';
-  await page.click(platformRow + '.querySelectorAll(".chip")[2]');
-  await page.sleep(150);
-  const val1 = await page.eval('__deep(".box textarea")[0].value');
-  ok('点一个选项：写进「使用平台」那一行', /使用平台：.*电脑软件/.test(val1), val1.split('\n').filter((l) => /使用平台/.test(l))[0]);
-  await page.click(platformRow + '.querySelectorAll(".chip")[3]');
-  await page.sleep(150);
-  const line2 = (await page.eval('__deep(".box textarea")[0].value')).split('\n').filter((l) => /^使用平台/.test(l))[0];
-  ok('再点一个：新选的和之前选的都在，可以多选', /小程序/.test(line2) && /电脑软件/.test(line2) && /手机应用/.test(line2), line2);
-  await page.click(platformRow + '.querySelectorAll(".chip")[2]');
-  await page.sleep(150);
-  const line3 = (await page.eval('__deep(".box textarea")[0].value')).split('\n').filter((l) => /^使用平台/.test(l))[0];
-  ok('再点已选的：取消，别的不动', !/电脑软件/.test(line3) && /小程序/.test(line3) && /手机应用/.test(line3), line3);
-  ok('点选项时填写框没有退出编辑', (await H.count('.box textarea')) === 1);
-  await page.key('Escape');
-  await page.sleep(150);
-  await page.resize(1280, 800);
 
   // ================= 桌面服务 =================
   console.log('桌面服务：最近标签和文件夹');

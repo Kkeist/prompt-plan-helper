@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path';
@@ -92,13 +92,18 @@ function summary(root, file) {
   return summaryOf(root, name);
 }
 
+// 标题和状态来自计划书；功能和进度来自它的功能清单（有的话）
 function summaryOf(root, file) {
   const md = readFileSync(join(root, file), 'utf8');
-  const list = Core.progressList(md);
+  const featureFile = Core.featureFileFor(file);
+  const hasFeatures = !!featureFile && existsSync(join(root, featureFile));
+  const list = Core.progressList(hasFeatures ? readFileSync(join(root, featureFile), 'utf8') : md);
   return {
     file,
     title: Core.titleName(md),
     status: Core.getStatus(md),
+    featureFile,
+    hasFeatures,
     total: list.length,
     done: list.filter((x) => x.status === 'done').length,
     doing: list.filter((x) => x.status === 'doing').length,
@@ -129,12 +134,38 @@ function known(root) {
   return claudeFolders().some((x) => norm(x.path) === n) || history().some((x) => norm(x.path) === n);
 }
 
-// 相对路径只允许顶层的计划书文件
+// 历史版本：文件夹里 .shupian/history/ 下，名字是 时间-功能清单文件名.md，每份功能清单只留最近的 HISTORY_KEEP 份
+const HISTORY_KEEP = 50;
+const HISTORY_NAME_RE = /^\d{8}-\d{6}-[^/\\:*?"<>|]+\.md$/;
+
+function historyDir(root) {
+  return join(resolve(root), '.shupian', 'history');
+}
+
+// 相对路径只允许顶层的计划书和功能清单文件，以及历史版本目录里的文件
 function planPath(root, rel) {
   if (!root || !known(root)) return '';
   const p = String(rel || '');
-  if (!PLAN_FILE_RE.test(p)) return '';
-  return join(resolve(root), p);
+  if (PLAN_FILE_RE.test(p) || Core.FEATURE_FILE_RE.test(p)) return join(resolve(root), p);
+  const m = /^\.shupian\/history\/([^/]+)$/.exec(p);
+  if (m && HISTORY_NAME_RE.test(m[1])) return join(historyDir(root), m[1]);
+  return '';
+}
+
+// 写了一份历史版本之后，同一份功能清单的旧版本只留最近的几份
+function pruneHistory(root, file) {
+  const dir = historyDir(root);
+  const mine = readdirSync(dir).filter((n) => HISTORY_NAME_RE.test(n) && n.slice(16).toLowerCase() === file.toLowerCase()).sort();
+  mine.slice(0, Math.max(0, mine.length - HISTORY_KEEP)).forEach((n) => unlinkSync(join(dir, n)));
+}
+
+function listHistory(root, file) {
+  const dir = historyDir(root);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((n) => HISTORY_NAME_RE.test(n) && n.slice(16).toLowerCase() === String(file).toLowerCase())
+    .sort().reverse()
+    .map((n) => ({ name: n, time: statSync(join(dir, n)).mtimeMs }));
 }
 
 // 文件夹名里不能有这些字符，也不能以点或空格结尾
@@ -329,10 +360,20 @@ export function startServer() {
           if (req.method === 'PUT') {
             const chunks = [];
             for await (const c of req) chunks.push(c);
+            mkdirSync(dirname(file), { recursive: true });
             writeFileSync(file, Buffer.concat(chunks));
+            const hm = HISTORY_NAME_RE.test(basename(file)) && basename(dirname(file)) === 'history' ? basename(file) : '';
+            if (hm) pruneHistory(url.searchParams.get('root'), hm.slice(16));
             json(200, { ok: true });
             return;
           }
+        }
+        if (url.pathname === '/api/history' && req.method === 'GET') {
+          const root = url.searchParams.get('root');
+          const file = String(url.searchParams.get('file') || '');
+          if (!root || !known(root) || !Core.FEATURE_FILE_RE.test(file)) { json(400, { error: 'path' }); return; }
+          json(200, { items: listHistory(root, file) });
+          return;
         }
         json(404, { error: 'api' });
         return;

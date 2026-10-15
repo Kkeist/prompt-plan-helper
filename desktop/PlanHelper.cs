@@ -326,6 +326,38 @@ class Server
     // 计划书文件：默认的名字，以及同一个文件夹里的多份（前缀加名称）；名字都来自语言文件
     static readonly string[] PlanNames = Vocab.Docs.Select(d => Vocab.Word(d, "planFile")).ToArray();
     static readonly Regex PlanFileRe = new Regex("^(?:" + string.Join("|", PlanNames.Select(n => Regex.Escape(Path.GetFileNameWithoutExtension(n)))) + ")(?:-[^\\\\/:*?\"<>|]{1,60})?\\.md$", RegexOptions.IgnoreCase);
+    // 功能清单：和计划书一一对应的另一份文件（features.md / 功能清单.md，features-名称.md / 功能清单-名称.md）
+    static readonly string[] FeatureNames = Vocab.Docs.Select(d => Vocab.Word(d, "featureFile")).ToArray();
+    static readonly Regex FeatureFileRe = new Regex("^(?:" + string.Join("|", FeatureNames.Select(n => Regex.Escape(Path.GetFileNameWithoutExtension(n)))) + ")(?:-[^\\\\/:*?\"<>|]{1,60})?\\.md$", RegexOptions.IgnoreCase);
+    // 历史版本在文件夹里的 .shupian/history/，名字是 时间-功能清单文件名.md，每份功能清单只留最近的 HistoryKeep 份
+    const int HistoryKeep = 50;
+    static readonly Regex HistoryNameRe = new Regex("^\\d{8}-\\d{6}-[^/\\\\:*?\"<>|]+\\.md$");
+
+    // 计划书文件名对应的功能清单文件名；不是计划书的名字返回空字符串
+    static string FeatureFileFor(string planFile)
+    {
+        if (string.IsNullOrEmpty(planFile) || !PlanFileRe.IsMatch(planFile)) return "";
+        foreach (var d in Vocab.Docs)
+        {
+            var plan = Vocab.Word(d, "planFile");
+            if (string.Equals(planFile, plan, StringComparison.OrdinalIgnoreCase)) return Vocab.Word(d, "featureFile");
+            var prefix = Vocab.Word(d, "filePrefix");
+            if (planFile.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return Vocab.Word(d, "featurePrefix") + planFile.Substring(prefix.Length);
+        }
+        return "";
+    }
+
+    static string HistoryDir(string root) { return Path.Combine(Path.GetFullPath(root), ".shupian", "history"); }
+
+    static List<string> HistoryFiles(string root, string file)
+    {
+        var dir = HistoryDir(root);
+        if (!Directory.Exists(dir)) return new List<string>();
+        return Directory.GetFiles(dir).Select(Path.GetFileName)
+            .Where(n => HistoryNameRe.IsMatch(n) && string.Equals(n.Substring(16), file, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(n => n, StringComparer.Ordinal).ToList();
+    }
+
     static readonly string Seps = "[：:]";
     static readonly string TbdAlt = Vocab.Alt(d => new[] { Vocab.Word(d, "tbd") });
     static readonly Regex ProgressLabelRe = new Regex("^" + Vocab.Alt(d => Vocab.List(d, "labels", "progress")) + Seps + "\\s*(.*)$", RegexOptions.IgnoreCase);
@@ -647,10 +679,26 @@ class Server
             }
             if (ctx.Request.HttpMethod == "PUT")
             {
+                Directory.CreateDirectory(Path.GetDirectoryName(file));
                 File.WriteAllBytes(file, ReadBody(ctx));
+                var written = Path.GetFileName(file);
+                if (HistoryNameRe.IsMatch(written) && Path.GetFileName(Path.GetDirectoryName(file)) == "history")
+                {
+                    var root = Query(url, "root");
+                    foreach (var old in HistoryFiles(root, written.Substring(16)).Skip(HistoryKeep)) File.Delete(Path.Combine(HistoryDir(root), old));
+                }
                 SendJson(ctx, 200, new { ok = true });
                 return;
             }
+        }
+        if (path == "/api/history" && ctx.Request.HttpMethod == "GET")
+        {
+            var root = Query(url, "root");
+            var file = Query(url, "file");
+            if (string.IsNullOrEmpty(root) || !Known(root) || !FeatureFileRe.IsMatch(file)) { SendJson(ctx, 400, new { error = "path" }); return; }
+            var items = HistoryFiles(root, file).Select(n => new Dictionary<string, object> { { "name", n }, { "time", ToMs(File.GetLastWriteTime(Path.Combine(HistoryDir(root), n))) } }).ToList();
+            SendJson(ctx, 200, new { items = items });
+            return;
         }
         SendJson(ctx, 404, new { error = "api" });
     }
@@ -804,8 +852,11 @@ class Server
     string PlanPath(string root, string rel)
     {
         if (string.IsNullOrEmpty(root) || !Known(root)) return null;
-        if (rel == null || !PlanFileRe.IsMatch(rel)) return null;
-        return Path.Combine(Path.GetFullPath(root), rel);
+        if (rel == null) return null;
+        if (PlanFileRe.IsMatch(rel) || FeatureFileRe.IsMatch(rel)) return Path.Combine(Path.GetFullPath(root), rel);
+        const string historyPrefix = ".shupian/history/";
+        if (rel.StartsWith(historyPrefix) && HistoryNameRe.IsMatch(rel.Substring(historyPrefix.Length))) return Path.Combine(HistoryDir(root), rel.Substring(historyPrefix.Length));
+        return null;
     }
 
     object Projects()
@@ -903,6 +954,12 @@ class Server
         var md = File.ReadAllText(Path.Combine(root, name), Encoding.UTF8).Replace("\r\n", "\n").Replace("\r", "\n");
         var lines = md.Split('\n');
         var pending = Pending(lines);
+        // 功能和进度来自功能清单（有的话），标题和状态来自计划书
+        var featureFile = FeatureFileFor(name);
+        var hasFeatures = featureFile != "" && File.Exists(Path.Combine(root, featureFile));
+        var countLines = hasFeatures
+            ? File.ReadAllText(Path.Combine(root, featureFile), Encoding.UTF8).Replace("\r\n", "\n").Replace("\r", "\n").Split('\n')
+            : lines;
         int total = 0, done = 0, doing = 0;
         var sec = "";
         var inFeature = false;
@@ -916,10 +973,10 @@ class Server
             inFeature = false;
             progress = null;
         };
-        var footer = FooterStart(lines);
+        var footer = FooterStart(countLines);
         for (var i = 0; i < footer; i++)
         {
-            var l = lines[i];
+            var l = countLines[i];
             var m = Regex.Match(l, @"^(#{1,6})\s+(.*)$");
             if (m.Success)
             {
@@ -951,7 +1008,7 @@ class Server
         if (Regex.IsMatch(title, "〈[^〉]*〉")) title = "";
         return new Dictionary<string, object>
         {
-            { "file", name }, { "title", title }, { "status", Status(lines) },
+            { "file", name }, { "title", title }, { "status", Status(lines) }, { "featureFile", featureFile }, { "hasFeatures", hasFeatures },
             { "total", total }, { "done", done }, { "doing", doing }, { "pending", pending },
         };
     }

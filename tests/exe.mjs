@@ -128,6 +128,38 @@ try {
     ok(label + '：未知文件夹被拒绝', unk.status === 404);
     await call(info, '/api/current', { method: 'POST', body: JSON.stringify({ path: proj, file: 'plan.md' }) });
   }
+  // 功能清单：和计划书是两个文件；摘要的进度来自功能清单；历史版本只允许写在固定位置，每份只留最近的 50 份
+  async function featureChecks(label, info) {
+    const put = (p, body) => call(info, '/api/file?root=' + encodeURIComponent(proj) + '&p=' + encodeURIComponent(p), { method: 'PUT', body });
+    const get = (p) => call(info, '/api/file?root=' + encodeURIComponent(proj) + '&p=' + encodeURIComponent(p));
+    const summaryOf = async () => (await call(info, '/api/connect', { method: 'POST', body: JSON.stringify({ path: proj }) })).json.summary;
+    const before = await summaryOf();
+    ok(label + '：还没有功能清单时摘要标出对应的文件名', before.featureFile === 'features.md' && before.hasFeatures === false, before);
+    const planMd = readFileSync(join(proj, 'plan.md'), 'utf8');
+    const features = ['# 功能清单：番茄钟（示例）', '', '## 4 功能', '', '### 4.1 倒计时', '', '进度：已完成', '', '### 4.2 今天完成几轮', '', '进度：已完成', '', '### 4.3 导出分享', '', '进度：未做', ''].join('\n');
+    const w = await put('features.md', features);
+    ok(label + '：可以写功能清单文件', w.status === 200 && readFileSync(join(proj, 'features.md'), 'utf8') === features);
+    const g = await get('features.md');
+    ok(label + '：可以读回功能清单文件', g.json && g.json.exists === true && g.json.text === features);
+    const after = await summaryOf();
+    ok(label + '：摘要的功能数和进度来自功能清单，标题和状态仍来自计划书', after.hasFeatures === true && after.total === 3 && after.done === 2 && after.title === before.title && after.status === before.status, after);
+    ok(label + '：计划书文件没有被改', readFileSync(join(proj, 'plan.md'), 'utf8') === planMd);
+    ok(label + '：别的文件名被拒绝', (await put('notes.md', 'x')).status === 400 && (await get('../features.md')).status === 400);
+
+    const hist = (n) => '.shupian/history/' + n;
+    const first = await put(hist('20260101-000001-features.md'), '旧版本一');
+    ok(label + '：历史版本可以写进 .shupian/history', first.status === 200 && existsSync(join(proj, '.shupian', 'history', '20260101-000001-features.md')));
+    ok(label + '：历史版本的名字不合格被拒绝', (await put(hist('bad.md'), 'x')).status === 400 && (await put('.shupian/other.md', 'x')).status === 400 && (await put('.shupian/history/../x.md', 'x')).status === 400);
+    for (let i = 2; i <= 55; i++) await put(hist('20260101-0000' + String(i).padStart(2, '0') + '-features.md'), '旧版本' + i);
+    const list = await call(info, '/api/history?root=' + encodeURIComponent(proj) + '&file=features.md');
+    const names = (list.json && list.json.items || []).map((x) => x.name);
+    ok(label + '：每份功能清单只留最近的 50 份历史，最新的在前', names.length === 50 && names[0] === '20260101-000055-features.md' && names[49] === '20260101-000006-features.md', [names.length, names[0], names[names.length - 1]]);
+    ok(label + '：历史列表只认功能清单文件名', (await call(info, '/api/history?root=' + encodeURIComponent(proj) + '&file=plan.md')).status === 400);
+    const old = await get(hist('20260101-000055-features.md'));
+    ok(label + '：可以读回历史版本', old.json && old.json.exists === true && old.json.text === '旧版本55');
+    rmSync(join(proj, 'features.md'), { force: true });
+    rmSync(join(proj, '.shupian'), { recursive: true, force: true });
+  }
   await folderChecks('桌面版', exeInfo, '新文件夹');
   await planChecks('桌面版', exeInfo, '计划书-第二份.md');
 
@@ -141,8 +173,10 @@ try {
   const a = await call(exeInfo, '/api/connect', { method: 'POST', body: JSON.stringify({ path: proj }) });
   const b = nodeInfo ? await call(nodeInfo, '/api/connect', { method: 'POST', body: JSON.stringify({ path: proj }) }) : null;
   ok('两个版本给出同样的摘要', !!b && JSON.stringify(a.json.summary) === JSON.stringify(b.json.summary), [a.json && a.json.summary, b && b.json && b.json.summary]);
+  await featureChecks('桌面版', exeInfo);
   if (nodeInfo) await folderChecks('Node 版', nodeInfo, '节点文件夹');
   if (nodeInfo) await planChecks('Node 版', nodeInfo, 'plan-第二份.md');
+  if (nodeInfo) await featureChecks('Node 版', nodeInfo);
   nodeProc.kill();
 } finally {
   exeProc.kill();
