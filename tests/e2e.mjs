@@ -1,7 +1,7 @@
 // 端到端自测：node tests/e2e.mjs
 // 无头 Chrome，交互走调试协议；浏览器文件夹用页面内的内存实现替身；桌面服务用临时的用户目录；截图放进 preview/。
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -216,6 +216,7 @@ try {
   const url = 'http://127.0.0.1:' + srvInfo.port + '/index.html?k=' + srvInfo.token + '&win=1';
   const win = await chrome.newPage();
   await win.init(DEEP);
+  await win.init('(function () { var f = window.fetch; window.__pick = null; window.__pickBodies = []; window.fetch = function (u, o) { if (typeof u === "string" && /\\/api\\/pick$/.test(u.split("?")[0]) && window.__pick) { window.__pickBodies.push(o && o.body); return Promise.resolve(new Response(JSON.stringify(window.__pick), { status: 200, headers: { "content-type": "application/json" } })); } return f.apply(this, arguments); }; })();');
   await win.init('window.__sizeCalls = []; window.resizeTo = function (w, h) { window.__sizeCalls.push(["resize", w, h]); }; window.moveTo = function (x, y) { window.__sizeCalls.push(["move", x, y]); };');
   await win.resize(420, 640);
   const HW = helpers(win);
@@ -260,6 +261,82 @@ try {
   ok('空文件夹：有一句说明和新建入口', (await HW.exists('.doc.empty p', '还没有计划书。', true)) && (await HW.exists('.doc.empty button', '新建空白计划书', true)));
   ok('空文件夹：窗口大小没变', JSON.stringify(await win.eval('window.__sizeCalls')) === sizeAtOpen, await win.eval('window.__sizeCalls'));
   await win.shot(join(shots, '09-空文件夹-420.png'));
+
+  console.log('桌面服务：新建计划书、保存到文件夹、新建文件夹、拖入');
+  const setPick = (obj) => win.eval('window.__pick = ' + JSON.stringify(obj));
+  const goHub = async () => { await win.click(Q('.tabbar .chip', '最近', true)); await HW.wait(async () => HW.exists('.frow'), 40); };
+  await goHub();
+  ok('最近页有三个入口', (await HW.exists('button', '新建计划书', true)) && (await HW.exists('button', '新建文件夹', true)) && (await HW.exists('button', '选择别的文件夹', true)));
+  const sizeBeforeNew = JSON.stringify(await win.eval('window.__sizeCalls'));
+  await win.click(btn('新建计划书'));
+  await HW.wait(async () => HW.exists('.doc h1'), 40);
+  ok('新建计划书：直接进入空白计划书', (await HW.text('.doc h1')) === '未命名项目' && (await HW.exists('.sec h2', '1 这是什么')), await HW.text('.doc h1'));
+  ok('新建计划书：提示可以保存到文件夹', await HW.exists('.statusline button', '保存到文件夹', true));
+  ok('新建计划书：窗口大小没变', JSON.stringify(await win.eval('window.__sizeCalls')) === sizeBeforeNew);
+
+  // 保存到没有计划书的文件夹
+  await setPick({ path: emptyDir, name: '空文件夹' });
+  await win.click(Q('.statusline button', '保存到文件夹', true));
+  await win.click(Q('.pop button', '选择已有文件夹', true));
+  await HW.wait(async () => HW.exists('.statusline .muted', '文件夹：空文件夹'), 40);
+  ok('保存到文件夹：显示文件夹名', await HW.exists('.statusline .muted', '文件夹：空文件夹'));
+  await sleep(500);
+  ok('保存到文件夹：文件夹里写出了 plan.md', existsSync(join(emptyDir, 'plan.md')) && /计划书/.test(readFileSync(join(emptyDir, 'plan.md'), 'utf8')));
+  ok('保存到文件夹：可以复制地址', await HW.exists('.statusline button', '复制地址', true));
+
+  // 保存到已有计划书的文件夹：不直接覆盖，选「用文件夹里的」
+  await goHub();
+  await win.click(btn('新建计划书'));
+  await HW.wait(async () => HW.exists('.statusline button', '保存到文件夹', true), 40);
+  await setPick({ path: projDir, name: '番茄钟项目' });
+  const diskBefore = readFileSync(join(projDir, 'plan.md'), 'utf8');
+  await win.click(Q('.statusline button', '保存到文件夹', true));
+  await win.click(Q('.pop button', '选择已有文件夹', true));
+  await HW.wait(async () => HW.exists('.modal h2', '这个文件夹里已有计划书'), 40);
+  ok('已有计划书：弹出选择，不直接覆盖', (await HW.exists('.modal h2', '这个文件夹里已有计划书')) && readFileSync(join(projDir, 'plan.md'), 'utf8') === diskBefore);
+  await win.click(Q('.modal-foot button', '用文件夹里的', true));
+  await HW.wait(async () => /番茄钟/.test((await HW.text('.doc h1')) || ''), 40);
+  ok('已有计划书：用文件夹里的，页面显示它的内容', /番茄钟/.test((await HW.text('.doc h1')) || ''), await HW.text('.doc h1'));
+  ok('已有计划书：磁盘上的没有被改', readFileSync(join(projDir, 'plan.md'), 'utf8') === diskBefore);
+
+  // 新建文件夹：先选放在哪里，再起名字
+  await goHub();
+  await setPick({ path: projDir, name: '番茄钟项目' });
+  await win.click(btn('新建文件夹'));
+  await HW.wait(async () => HW.exists('.modal input'), 40);
+  ok('新建文件夹：询问选择位置时带了说明', /新文件夹放在哪里/.test(String((await win.eval('window.__pickBodies')).slice(-1)[0])), await win.eval('window.__pickBodies'));
+  mkdirSync(join(projDir, '已有文件夹'), { recursive: true });
+  await win.click(Q('.modal input'));
+  await win.insert('已有文件夹');
+  await win.click(Q('.modal-foot button', '创建', true));
+  await sleep(300);
+  await win.eval('0');
+  ok('新建文件夹：同名时说明原因，不关闭', /已有同名文件夹/.test((await HW.text('.modal .err')) || ''), await HW.text('.modal .err'));
+  await win.eval('(function(){var i=__one(".modal input");i.value=""})()');
+  await win.click(Q('.modal input'));
+  await win.insert('新建的文件夹');
+  await win.click(Q('.modal-foot button', '创建', true));
+  await HW.wait(async () => HW.exists('.tabbar .tab .tab-name', '新建的文件夹'), 40);
+  ok('新建文件夹：磁盘上有这个文件夹', existsSync(join(projDir, '新建的文件夹')));
+  ok('新建文件夹：自动打开，显示文件夹名作标题', (await HW.text('.doc.empty h1')) === '新建的文件夹', await HW.text('.doc.empty h1'));
+
+  // 拖入文件夹：用浏览器内部的文件夹句柄模拟拖入
+  const dropJs = (name, files) => '(async function(){var root=await navigator.storage.getDirectory();var d=await root.getDirectoryHandle(' + JSON.stringify(name) + ',{create:true});' +
+    files.map((f) => 'await (await d.getFileHandle(' + JSON.stringify(f) + ',{create:true})).createWritable().then(function(w){return w.write("x").then(function(){return w.close()})});').join('') +
+    'var ev=new Event("drop",{bubbles:true,cancelable:true,composed:true});ev.dataTransfer={types:["Files"],items:[{kind:"file",getAsFileSystemHandle:function(){return Promise.resolve(d)}}]};' +
+    'var host=document.querySelector("#shupian-app")||document.body;var target=(host.shadowRoot&&host.shadowRoot.querySelector(".app"))||host;target.dispatchEvent(ev);return true})()';
+  await goHub();
+  await win.eval(dropJs('番茄钟项目', ['plan.md']));
+  await HW.wait(async () => HW.exists('.tabbar .tab.on .tab-name', '番茄钟（示例）'), 60);
+  ok('拖入文件夹：按名字找到地址并打开', await HW.exists('.tabbar .tab.on .tab-name', '番茄钟（示例）'), await HW.text('.tabbar'));
+  ok('拖入文件夹：可以复制地址', await HW.exists('.statusline button', '复制地址', true));
+  await goHub();
+  await win.eval(dropJs('不存在的文件夹名', []));
+  await HW.wait(async () => HW.exists('.tabbar .tab .tab-name', '不存在的文件夹名'), 60);
+  ok('拖入文件夹：找不到地址时也能打开，并说明', (await HW.exists('.tabbar .tab .tab-name', '不存在的文件夹名')) && /没有找到这个文件夹的地址/.test((await HW.text('.toast')) || ''), await HW.text('.toast'));
+  ok('拖入文件夹：没有地址时不显示复制地址', !(await HW.exists('.statusline button', '复制地址', true)));
+  ok('拖入和新建之后窗口大小仍没变', JSON.stringify(await win.eval('window.__sizeCalls')) === sizeAtOpen, await win.eval('window.__sizeCalls'));
+  await win.shot(join(shots, '10-拖入文件夹-420.png'));
 
   // ================= 悬浮窗 =================
   console.log('小悬浮窗');

@@ -6,8 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import os from 'node:os';
 
-const CHROME = ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe']
-  .filter((p) => existsSync(p))[0];
+const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const EDGE_PATH = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+const CHROME = [CHROME_PATH, EDGE_PATH].filter((p) => existsSync(p))[0];
+// 新版 Chrome 不再接受命令行加载扩展，带扩展的测试用 Edge
+const EDGE = [EDGE_PATH, CHROME_PATH].filter((p) => existsSync(p))[0];
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -22,11 +25,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function launch(recordFile, extraArgs) {
   const port = await freePort();
   const dir = mkdtempSync(join(tmpdir(), 'shupian-chrome-'));
-  const proc = spawn(CHROME, [
+  const withExtension = (extraArgs || []).some((a) => a.indexOf('--load-extension') === 0);
+  const proc = spawn(withExtension ? EDGE : CHROME, [
     '--headless=new', '--remote-debugging-port=' + port, '--user-data-dir=' + dir,
-    '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking',
+    '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
     '--window-size=1280,900', '--lang=zh-CN',
-  ].concat(extraArgs || [], ['about:blank']), { stdio: 'ignore' });
+  ].concat((extraArgs || []).some((a) => a.indexOf('--load-extension') === 0) ? [] : ['--disable-extensions'], extraArgs || [], ['about:blank']), { stdio: 'ignore' });
   try { os.setPriority(proc.pid, os.constants.priority.PRIORITY_LOW); } catch (e) { /* 优先级设置失败不影响测试 */ }
   spawnSync('powershell', ['-NoProfile', '-Command', '(Get-Process -Id ' + proc.pid + ').ProcessorAffinity = 3'], { stdio: 'ignore' });
   if (recordFile) writeFileSync(recordFile, JSON.stringify({ pid: proc.pid, port, dir }));

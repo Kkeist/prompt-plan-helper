@@ -67,6 +67,21 @@ try {
   const conn = await call(exeInfo, '/api/connect', { method: 'POST', body: JSON.stringify({ path: proj }) });
   ok('连接文件夹，记入连接历史', conn.status === 200 && existsSync(join(home, '.shupian', 'history.json')), conn.text.slice(0, 120));
 
+  // 新建文件夹和按名字找文件夹：两个版本都要通过同样的检查
+  async function folderChecks(label, info, made) {
+    const post = (path, obj) => call(info, path, { method: 'POST', body: JSON.stringify(obj) });
+    const r = await post('/api/mkdir', { parent: proj, name: made });
+    ok(label + '：新建文件夹', r.status === 200 && existsSync(join(proj, made)) && r.json.name === made, r.text.slice(0, 120));
+    ok(label + '：同名文件夹被拒绝', (await post('/api/mkdir', { parent: proj, name: made })).status === 409);
+    ok(label + '：非法名称被拒绝', (await post('/api/mkdir', { parent: proj, name: 'a/b' })).status === 400 && (await post('/api/mkdir', { parent: proj, name: '  ' })).status === 400);
+    ok(label + '：不在未知文件夹里新建', (await post('/api/mkdir', { parent: 'C:\Windows', name: made + 'x' })).status === 404);
+    const hit = await post('/api/locate', { name: '番茄钟项目', entries: ['plan.md'] });
+    ok(label + '：按名字和文件找到文件夹', hit.status === 200 && hit.json.candidates.some((x) => x.toLowerCase() === proj.toLowerCase()), hit.text.slice(0, 160));
+    const miss = await post('/api/locate', { name: '番茄钟项目', entries: ['不存在的文件.md'] });
+    ok(label + '：里面的文件对不上时不返回', miss.status === 200 && miss.json.candidates.length === 0, miss.text.slice(0, 160));
+  }
+  await folderChecks('桌面版', exeInfo, '新文件夹');
+
   // 和 Node 版本服务对照：同一份数据，摘要一致
   const nodeProc = spawn(process.execPath, [join(root, 'tools', 'app-server.mjs')], { env: Object.assign({}, env, { PORT: '14633' }), stdio: 'ignore' });
   let nodeInfo = null;
@@ -77,6 +92,7 @@ try {
   const a = await call(exeInfo, '/api/connect', { method: 'POST', body: JSON.stringify({ path: proj }) });
   const b = nodeInfo ? await call(nodeInfo, '/api/connect', { method: 'POST', body: JSON.stringify({ path: proj }) }) : null;
   ok('两个版本给出同样的摘要', !!b && JSON.stringify(a.json.summary) === JSON.stringify(b.json.summary), [a.json && a.json.summary, b && b.json && b.json.summary]);
+  if (nodeInfo) await folderChecks('Node 版', nodeInfo, '节点文件夹');
   nodeProc.kill();
 } finally {
   exeProc.kill();

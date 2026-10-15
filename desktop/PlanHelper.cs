@@ -246,6 +246,8 @@ class Server
     static readonly string[] PlanNames = { "plan.md", "计划书.md" };
     readonly string home = Environment.GetEnvironmentVariable("USERPROFILE") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     readonly HashSet<string> connected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    // 拖入的文件夹按名字找到的候选，用户已经明确要打开它，可以连接
+    readonly HashSet<string> offered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     readonly string token;
     HttpListener listener;
     int port;
@@ -410,9 +412,37 @@ class Server
     {
         if (path == "/api/ping") { SendJson(ctx, 200, new { ok = true }); return; }
         if (path == "/api/projects") { SendJson(ctx, 200, Projects()); return; }
+        if (path == "/api/mkdir" && ctx.Request.HttpMethod == "POST")
+        {
+            var obj = Json.DeserializeObject(Encoding.UTF8.GetString(ReadBody(ctx))) as Dictionary<string, object>;
+            var parent = obj != null && obj.ContainsKey("parent") ? Convert.ToString(obj["parent"]) : "";
+            var name = obj != null && obj.ContainsKey("name") ? Convert.ToString(obj["name"]) : "";
+            var bad = FolderNameError(name);
+            if (bad != "") { SendJson(ctx, 400, new { error = bad }); return; }
+            if (parent == "" || !Directory.Exists(parent) || !Known(parent)) { SendJson(ctx, 404, new { error = "folder" }); return; }
+            var target = Path.Combine(Path.GetFullPath(parent), name.Trim());
+            if (Directory.Exists(target) || File.Exists(target)) { SendJson(ctx, 409, new { error = "exists" }); return; }
+            Directory.CreateDirectory(target);
+            var made = Remember(target);
+            SendJson(ctx, 200, new { path = made, name = Path.GetFileName(made) });
+            return;
+        }
+        if (path == "/api/locate" && ctx.Request.HttpMethod == "POST")
+        {
+            var obj = Json.DeserializeObject(Encoding.UTF8.GetString(ReadBody(ctx))) as Dictionary<string, object>;
+            var name = obj != null && obj.ContainsKey("name") ? Convert.ToString(obj["name"]) : "";
+            if (FolderNameError(name) != "") { SendJson(ctx, 400, new { error = "name" }); return; }
+            var entries = new List<string>();
+            var arr = obj.ContainsKey("entries") ? obj["entries"] as System.Collections.IEnumerable : null;
+            if (arr != null) foreach (var e in arr) entries.Add(Convert.ToString(e));
+            SendJson(ctx, 200, new { candidates = LocateFolder(name.Trim(), entries) });
+            return;
+        }
         if (path == "/api/pick" && ctx.Request.HttpMethod == "POST")
         {
-            var picked = PickFolder();
+            var pickBody = Json.DeserializeObject(Encoding.UTF8.GetString(ReadBody(ctx))) as Dictionary<string, object>;
+            var description = pickBody != null && pickBody.ContainsKey("description") ? Convert.ToString(pickBody["description"]) : "";
+            var picked = PickFolder(description);
             if (string.IsNullOrEmpty(picked) || !Directory.Exists(picked)) { SendJson(ctx, 200, new { path = "" }); return; }
             var full = Remember(picked);
             SendJson(ctx, 200, new { path = full, name = Path.GetFileName(full) });
@@ -455,7 +485,46 @@ class Server
         return ms.ToArray();
     }
 
-    string PickFolder()
+    // 文件夹名里不能有这些字符，也不能以点或空格结尾
+    static string FolderNameError(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "empty";
+        if (name.Length > 100 || Regex.IsMatch(name, "[\\\\/:*?\"<>|]") || Regex.IsMatch(name, "[. ]$") || name == "." || name == "..") return "name";
+        return "";
+    }
+
+    // 按名字和里面的文件找一个拖进来的文件夹的地址：只在已知文件夹的上一级和已知文件夹本身里找
+    List<string> LocateFolder(string name, List<string> entries)
+    {
+        var parents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var own = new List<string>();
+        foreach (var f in ClaudeFolders().Concat(History()))
+        {
+            var full = Path.GetFullPath(f.path);
+            own.Add(full);
+            var up = Path.GetDirectoryName(full);
+            if (!string.IsNullOrEmpty(up)) parents.Add(up);
+        }
+        foreach (var c in connected)
+        {
+            own.Add(c);
+            var up = Path.GetDirectoryName(c);
+            if (!string.IsNullOrEmpty(up)) parents.Add(up);
+        }
+        var found = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        Action<string> check = dir =>
+        {
+            if (!Directory.Exists(dir)) return;
+            var have = new HashSet<string>(Directory.GetFileSystemEntries(dir).Select(Path.GetFileName), StringComparer.OrdinalIgnoreCase);
+            if (entries.All(e => have.Contains(e))) found[dir] = dir;
+        };
+        foreach (var p in parents) check(Path.Combine(p, name));
+        foreach (var p in own.Where(x => string.Equals(Path.GetFileName(x), name, StringComparison.OrdinalIgnoreCase))) check(p);
+        foreach (var f in found.Values) offered.Add(Path.GetFullPath(f));
+        return found.Values.ToList();
+    }
+
+    string PickFolder(string description)
     {
         string result = "";
         var t = new Thread(() =>
@@ -463,6 +532,7 @@ class Server
             using (var d = new FolderBrowserDialog())
             {
                 d.ShowNewFolderButton = true;
+                d.Description = description ?? "";
                 if (d.ShowDialog() == DialogResult.OK) result = d.SelectedPath;
             }
         });
@@ -549,7 +619,7 @@ class Server
     {
         string full;
         try { full = Path.GetFullPath(path); } catch (Exception) { return false; }
-        if (connected.Contains(full)) return true;
+        if (connected.Contains(full) || offered.Contains(full)) return true;
         return ClaudeFolders().Any(x => string.Equals(x.path, full, StringComparison.OrdinalIgnoreCase))
             || History().Any(x => string.Equals(x.path, full, StringComparison.OrdinalIgnoreCase));
     }

@@ -74,6 +74,8 @@ function summary(root) {
 }
 
 const connected = new Set();
+// 拖入的文件夹按名字找到的候选，用户已经明确要打开它，可以连接
+const offered = new Set();
 function history() {
   return readJson(HISTORY_FILE, []).filter((x) => x && x.path && existsSync(x.path));
 }
@@ -90,7 +92,7 @@ function remember(path) {
 
 function known(root) {
   const n = norm(root);
-  if (connected.has(n)) return true;
+  if (connected.has(n) || offered.has(n)) return true;
   return claudeFolders().some((x) => norm(x.path) === n) || history().some((x) => norm(x.path) === n);
 }
 
@@ -102,22 +104,51 @@ function planPath(root, rel) {
   return join(resolve(root), p);
 }
 
+// 文件夹名里不能有这些字符，也不能以点或空格结尾
+function folderNameError(name) {
+  const n = String(name || '');
+  if (!n.trim()) return 'empty';
+  if (n.length > 100 || /[\\/:*?"<>|]/.test(n) || /[. ]$/.test(n) || n === '.' || n === '..') return 'name';
+  return '';
+}
+
+// 按名字和里面的文件找一个拖进来的文件夹的地址：只在已知文件夹的上一级和已知文件夹本身里找
+function locateFolder(name, entries) {
+  const parents = new Set();
+  const own = [];
+  claudeFolders().concat(history()).forEach((x) => { parents.add(dirname(resolve(x.path))); own.push(resolve(x.path)); });
+  connected.forEach((p) => { parents.add(dirname(resolve(p))); own.push(resolve(p)); });
+  const want = (entries || []).map((e) => String(e).toLowerCase());
+  const found = new Map();
+  const check = (dir) => {
+    if (!existsSync(dir) || !statSync(dir).isDirectory()) return;
+    const have = new Set(readdirSync(dir).map((e) => e.toLowerCase()));
+    if (want.every((e) => have.has(e))) found.set(norm(dir), resolve(dir));
+  };
+  parents.forEach((p) => check(join(p, name)));
+  own.filter((p) => basename(p).toLowerCase() === String(name).toLowerCase()).forEach(check);
+  found.forEach((full, key) => offered.add(key));
+  return Array.from(found.values());
+}
+
 const types = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
   '.webmanifest': 'application/manifest+json', '.xml': 'application/xml',
 };
 
-function pickFolder() {
+function pickFolder(description) {
   return new Promise((resolvePick) => {
     const script = [
       'Add-Type -AssemblyName System.Windows.Forms',
       '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
       '$f = New-Object System.Windows.Forms.FolderBrowserDialog',
       '$f.ShowNewFolderButton = $true',
+      '$f.Description = $env:SHUPIAN_PICK_TEXT',
       "if ($f.ShowDialog() -eq 'OK') { Write-Output $f.SelectedPath }",
     ].join('; ');
-    const ps = spawn('powershell', ['-NoProfile', '-STA', '-Command', script], { windowsHide: true });
+    const env = Object.assign({}, process.env, { SHUPIAN_PICK_TEXT: String(description || '').slice(0, 200) });
+    const ps = spawn('powershell', ['-NoProfile', '-STA', '-Command', script], { windowsHide: true, env });
     let out = '';
     ps.stdout.on('data', (d) => { out += d.toString('utf8'); });
     ps.on('close', () => resolvePick(out.trim()));
@@ -151,8 +182,32 @@ export function startServer() {
           json(200, { claude, history: hist });
           return;
         }
+        const readJsonBody = async () => {
+          const chunks = [];
+          for await (const c of req) chunks.push(c);
+          return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+        };
+        if (url.pathname === '/api/mkdir' && req.method === 'POST') {
+          const body = await readJsonBody();
+          const bad = folderNameError(body.name);
+          if (bad) { json(400, { error: bad }); return; }
+          if (!body.parent || !existsSync(body.parent) || !known(body.parent)) { json(404, { error: 'folder' }); return; }
+          const target = join(resolve(body.parent), String(body.name).trim());
+          if (existsSync(target)) { json(409, { error: 'exists' }); return; }
+          mkdirSync(target);
+          const full = remember(target);
+          json(200, { path: full, name: basename(full) });
+          return;
+        }
+        if (url.pathname === '/api/locate' && req.method === 'POST') {
+          const body = await readJsonBody();
+          if (folderNameError(body.name)) { json(400, { error: 'name' }); return; }
+          json(200, { candidates: locateFolder(String(body.name).trim(), Array.isArray(body.entries) ? body.entries : []) });
+          return;
+        }
         if (url.pathname === '/api/pick' && req.method === 'POST') {
-          const p = await pickFolder();
+          const picked = await readJsonBody();
+          const p = await pickFolder(picked.description);
           if (!p || !existsSync(p)) { json(200, { path: '' }); return; }
           const full = remember(p);
           json(200, { path: full, name: basename(full) });

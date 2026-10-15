@@ -75,6 +75,12 @@ function nextFrames(n) {
 
 function mountFloat(autoOpen) {
   if (window.top !== window) return null;
+  // 页面自己引入了脚本又装了扩展时只留一份：扩展的那份能连桌面小窗口
+  const existing = document.querySelector('[data-shupian]');
+  if (existing) {
+    if (!Link.available) return null;
+    existing.remove();
+  }
   installErrorHook();
   const host = document.createElement('div');
   host.setAttribute('data-shupian', '');
@@ -150,7 +156,7 @@ function mountFloat(autoOpen) {
 
   const open = () => {
     if (!built) {
-      win.append(createFeedback({ tools, onClose: close }).el);
+      win.append(createFeedback({ tools, onClose: close, onLayout: () => { if (isOpen) placeWin(winPos(), false, false); } }).el);
       built = true;
     }
     isOpen = true;
@@ -198,6 +204,10 @@ function mountFloat(autoOpen) {
   const want = params.get('shupian') || (location.hash.indexOf('#shupian-') === 0 ? location.hash.slice(9) : '');
   const start = () => {
     const page = document.getElementById('shupian-app');
+    if (page && Link.available && SERVER) {
+      chrome.runtime.sendMessage({ shupian: 'pair', port: location.port, token: SERVER.token }, () => void chrome.runtime.lastError);
+      return;
+    }
     const api = page ? mountPage(page) : mountFloat(!!want || document.documentElement.hasAttribute('data-shupian-open'));
     if (!api) return;
     window.Shupian = api;

@@ -1,7 +1,7 @@
 'use strict';
 // 「最近」标签里的文件夹列表（本机服务提供）：最近在用的文件夹，一键打开计划书、复制地址。
 
-// o: { kit, current, onPick(path), onBrowse() }
+// o: { kit, current, onPick(path), onBrowse(), onNewPlan(), onNewFolder() }
 function folderRows(container, o) {
   clear(container);
   container.append(h('p', { class: 'muted', text: t('正在读取最近的文件夹') }));
@@ -30,7 +30,10 @@ function folderRows(container, o) {
     section(t('最近使用的文件夹'), recent);
     section(t('连接过的文件夹'), data.history);
     if (!data.claude.length && !data.history.length) container.append(h('p', { class: 'muted', text: t('没有找到最近使用的文件夹，可以通过下方按钮选择。') }));
-    container.append(h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: o.onBrowse }, t('选择别的文件夹'))));
+    container.append(h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'btn primary', onclick: o.onNewPlan }, t('新建计划书')),
+      h('button', { type: 'button', class: 'btn', onclick: o.onNewFolder }, t('新建文件夹')),
+      h('button', { type: 'button', class: 'btn', onclick: o.onBrowse }, t('选择别的文件夹'))));
   }, (e) => {
     clear(container);
     container.append(h('p', { class: 'err', text: t('读取文件夹列表失败：{why}', { why: errText(e) }) }));

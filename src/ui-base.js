@@ -126,6 +126,21 @@ const Api = {
   },
 };
 
+// 悬浮窗到桌面服务的通道：只在浏览器扩展里可用，端口和口令由扩展后台持有，页面里拿不到
+const Link = {
+  available: typeof chrome !== 'undefined' && !!(chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage),
+  // 失败时抛出的错误 message：unpaired（还没有打开过桌面小窗口）、down（服务没有响应）、或接口的状态码
+  call(method, path, body) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ shupian: 'api', method, path, body }, (r) => {
+        if (chrome.runtime.lastError || !r) { reject(new Error('down')); return; }
+        if (!r.ok) { reject(new Error(r.why)); return; }
+        resolve(r.json);
+      });
+    });
+  },
+};
+
 // ---------- 文件夹 ----------
 // handle 要么是浏览器授权的目录句柄，要么是 { server: true, root, name }
 

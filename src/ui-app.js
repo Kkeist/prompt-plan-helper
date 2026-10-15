@@ -259,7 +259,7 @@ function createApp(opts) {
     try {
       let handle = null;
       if (S.project.path && SERVER) handle = { server: true, root: S.project.path, name: S.project.name };
-      else if (!SERVER) handle = await kvGet('handle:' + NS + ':' + pid);
+      else handle = await kvGet('handle:' + NS + ':' + pid);
       if (!handle || S.project.id !== pid) return;
       S.folder.handle = handle;
       S.folder.name = handle.name || S.project.name;
@@ -313,6 +313,172 @@ function createApp(opts) {
       index.list.push(p);
     }
     useProject(p);
+  }
+
+  // 新建计划书：先不放进文件夹，写好以后用「保存到文件夹」存
+  function newPlanHere() {
+    persist();
+    const p = { id: newId(), name: t('新项目') };
+    index.list.push(p);
+    useProject(p);
+    newBlank();
+  }
+
+  function apiStatus(e) {
+    return Number((/ (\d+)$/.exec(e && e.message) || [])[1] || 0);
+  }
+
+  // 先选放在哪里，再起名字，创建后交给 then(路径)
+  async function newFolderFlow(then) {
+    let where;
+    try {
+      where = await Api.call('POST', '/api/pick', { description: t('选择新文件夹放在哪里。') });
+    } catch (e) {
+      toast(t('无法打开文件夹：{why}', { why: errText(e) }));
+      return;
+    }
+    if (!where.path) return;
+    const input = h('input', { class: 'in', placeholder: t('文件夹名称'), 'aria-label': t('文件夹名称') });
+    const err = h('p', { class: 'err', style: 'display:none' });
+    let closeModal = null;
+    const go = async () => {
+      err.style.display = 'none';
+      try {
+        const r = await Api.call('POST', '/api/mkdir', { parent: where.path, name: input.value });
+        closeModal();
+        then(r.path);
+      } catch (e) {
+        const st = apiStatus(e);
+        err.textContent = st === 409 ? t('已有同名文件夹，请换一个名称。') : st === 400 ? t('名称不能为空，也不能包含 / : * ? " < > | 这些符号。') : t('无法新建文件夹：{why}', { why: errText(e) });
+        err.style.display = '';
+        input.focus({ preventScroll: true });
+      }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+    kit.openModal({
+      title: t('新建文件夹'),
+      small: true,
+      body: h('div', null, h('p', { class: 'muted', text: where.path }), input, err),
+      foot: (close) => {
+        closeModal = close;
+        return [
+          h('button', { type: 'button', class: 'btn', onclick: close }, t('取消')),
+          h('button', { type: 'button', class: 'btn primary', onclick: go }, t('创建')),
+        ];
+      },
+    });
+    setTimeout(() => input.focus({ preventScroll: true }), 0);
+  }
+
+  async function pickFolderPath() {
+    try {
+      const r = await Api.call('POST', '/api/pick', { description: t('选择计划书所在的文件夹。') });
+      return r.path || '';
+    } catch (e) {
+      toast(t('无法打开文件夹：{why}', { why: errText(e) }));
+      return '';
+    }
+  }
+
+  // 把当前的计划书存进一个文件夹；文件夹里已有计划书时让用户选，不直接覆盖
+  async function attachFolderPath(path) {
+    let r;
+    try {
+      r = await Api.call('POST', '/api/connect', { path });
+    } catch (e) {
+      toast(t('无法打开文件夹：{why}', { why: errText(e) }));
+      return;
+    }
+    const attach = async (useFolderPlan) => {
+      S.project.path = r.path;
+      saveIndex();
+      S.folder = Object.assign(freshFolder(), { handle: { server: true, root: r.path, name: r.name }, name: r.name, path: r.path, state: 'ready' });
+      if (useFolderPlan) {
+        const found = await findPlan(S.folder.handle);
+        S.folder.file = found.name;
+        S.folder.synced = found.text;
+        commit(found.text, true);
+        S.lastSync = clockText();
+        renderAll();
+        toast(t('已载入文件夹中的计划书。'), { label: t('撤销'), run: () => undo() });
+      } else {
+        await folderPush();
+        S.lastSync = clockText();
+        renderAll();
+        toast(t('已保存到文件夹「{name}」。', { name: r.name }));
+      }
+    };
+    if (!r.summary) { attach(false); return; }
+    kit.openModal({
+      title: t('这个文件夹里已有计划书'),
+      small: true,
+      body: h('p', { class: 'p', text: t('用哪一份？选「用当前的替换」会替换文件夹里的计划书。') }),
+      foot: (close) => [
+        h('button', { type: 'button', class: 'btn', onclick: close }, t('取消')),
+        h('button', { type: 'button', class: 'btn', onclick() { close(); attach(true); } }, t('用文件夹里的')),
+        h('button', { type: 'button', class: 'btn primary', onclick() { close(); attach(false); } }, t('用当前的替换')),
+      ],
+    });
+  }
+
+  function openSaveTo(anchor) {
+    kit.openPop(anchor, (pop, close) => {
+      pop.append(kit.popItem(t('选择已有文件夹'), async () => {
+        const path = await pickFolderPath();
+        if (path) attachFolderPath(path);
+      }));
+      pop.append(kit.popItem(t('新建文件夹'), () => newFolderFlow(attachFolderPath)));
+    });
+  }
+
+  // 拖入文件夹：服务按名字和里面的文件找到它的地址；找不到就直接用浏览器授权的方式打开
+  async function dropFolder(dt) {
+    const item = dt.items && dt.items[0];
+    if (!item || item.kind !== 'file') { toast(t('请拖入文件夹，不是文件。')); return; }
+    if (!item.getAsFileSystemHandle) { toast(t('这个浏览器不支持拖入文件夹，请使用「选择别的文件夹」。')); return; }
+    let handle;
+    const entries = [];
+    try {
+      handle = await item.getAsFileSystemHandle();
+      if (handle && handle.kind === 'directory' && SERVER) {
+        for await (const pair of handle.entries()) { entries.push(pair[0]); if (entries.length >= 200) break; }
+      }
+    } catch (e) {
+      toast(t('无法读取拖入的内容：{why}', { why: errText(e) }));
+      return;
+    }
+    if (!handle || handle.kind !== 'directory') { toast(t('请拖入文件夹，不是文件。')); return; }
+    if (SERVER) {
+      let found;
+      try {
+        found = await Api.call('POST', '/api/locate', { name: handle.name, entries });
+      } catch (e) {
+        toast(t('无法打开文件夹：{why}', { why: errText(e) }));
+        return;
+      }
+      if (found.candidates.length === 1) { connectFolderPath(found.candidates[0]); return; }
+      if (found.candidates.length > 1) {
+        const dup = kit.openModal({
+          title: t('找到多个同名文件夹，请选择'),
+          small: true,
+          body: h('div', null, found.candidates.map((p) => h('button', { type: 'button', class: 'btn pick-row', onclick() { dup.close(); connectFolderPath(p); } }, p))),
+          foot: (close) => [h('button', { type: 'button', class: 'btn', onclick: close }, t('取消'))],
+        });
+        return;
+      }
+    }
+    try {
+      if (!(await Folder.permission(handle, true))) { toast(t('授权未完成：{why}', { why: t('没有读写权限') })); return; }
+    } catch (e) {
+      toast(t('授权未完成：{why}', { why: errText(e) }));
+      return;
+    }
+    persist();
+    const p = { id: newId(), name: handle.name };
+    index.list.push(p);
+    try { await kvSet('handle:' + NS + ':' + p.id, handle); } catch (e) { toast(t('未能保存文件夹授权，下次打开需要重新选择文件夹。')); }
+    useProject(p);
+    if (SERVER) toast(t('没有找到这个文件夹的地址，可以打开和保存计划书，但不能复制地址。'));
   }
 
   async function folderRegrant() {
@@ -868,6 +1034,10 @@ function createApp(opts) {
         toast(t('计划书已确认，可以开始制作。'));
       } }, t('确认并开始')));
     }
+    if (SERVER && S.folder.state !== 'ready' && S.md.trim()) {
+      const save = h('button', { type: 'button', class: 'btn sm', onclick() { openSaveTo(save); } }, t('保存到文件夹'));
+      box.append(save);
+    }
     if (S.folder.state === 'ready') {
       box.append(h('span', { class: 'muted', text: t('文件夹：{name}', { name: S.folder.name }) + (S.lastSync ? '　' + t('同步于 {time}', { time: S.lastSync }) : '') }));
       if (S.folder.path) {
@@ -909,6 +1079,7 @@ function createApp(opts) {
       }
       pop.append(h('hr'));
       if (f.state === 'off') add(t('文件夹功能需要电脑版 Chrome 或 Edge'), () => {}, { disabled: true });
+      else if (f.state === 'none' && SERVER) add(t('保存到文件夹'), () => openSaveTo(anchor));
       else if (f.state === 'none') add(t('连接文件夹'), folderConnect);
       else if (f.state === 'need') add(t('重新授权文件夹'), folderRegrant);
       else {
@@ -976,13 +1147,11 @@ function createApp(opts) {
       current: S.project && S.project.path ? S.project.path : '',
       onPick: (path) => connectFolderPath(path),
       onBrowse: async () => {
-        try {
-          const r = await Api.call('POST', '/api/pick', {});
-          if (r.path) connectFolderPath(r.path);
-        } catch (e) {
-          toast(t('无法打开文件夹：{why}', { why: errText(e) }));
-        }
+        const path = await pickFolderPath();
+        if (path) connectFolderPath(path);
       },
+      onNewPlan: newPlanHere,
+      onNewFolder: () => newFolderFlow(connectFolderPath),
     });
     return h('div', { class: 'col' }, list);
   }
@@ -1040,6 +1209,15 @@ function createApp(opts) {
     else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); if (!redo()) toast(t('没有可重做的操作。')); }
   });
   body.addEventListener('scroll', kit.closePop);
+  {
+    let depth = 0;
+    const hasFiles = (e) => !!(e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0);
+    const veil = h('div', { class: 'mask' }, h('div', { class: 'drop-text', text: t('松开即可打开文件夹。') }));
+    app.addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; e.preventDefault(); if (depth++ === 0) app.append(veil); });
+    app.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+    app.addEventListener('dragleave', (e) => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (depth === 0) veil.remove(); });
+    app.addEventListener('drop', (e) => { if (!hasFiles(e)) return; e.preventDefault(); depth = 0; veil.remove(); dropFolder(e.dataTransfer); });
+  }
   let growTimer = 0;
   window.addEventListener('resize', () => {
     kit.closePop();

@@ -267,6 +267,8 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 
 /* 功能清单：问题和小弹窗 */
 .modal.small { max-width: 24em; }
+.drop-text { background: var(--paper); border: 2px solid var(--ink); border-radius: 0.7em; padding: 1em 1.4em; font-weight: 700; text-align: center; }
+.pick-row { display: block; width: 100%; text-align: left; margin-bottom: 0.4em; overflow-wrap: anywhere; }
 .status-head .btn { margin-left: auto; }
 .issue { display: flex; align-items: flex-start; margin: 0.2em 0 0.2em 1.2em; padding: 0.25em 0.5em; background: var(--soft); border-radius: 0.5em; }
 .issue-text { flex: 1; min-width: 0; margin: 0 0.5em; overflow-wrap: anywhere; }
