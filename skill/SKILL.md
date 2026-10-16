@@ -42,6 +42,7 @@ Architecture is decoupled by default and is not asked of the user: modules expos
 - Starting a feature: `node tools/shupian.mjs progress plan.md "<feature name>" doing`
 - Finished and checked: `... done`
 - The user watches the feature list on the page, so keep it true. 用户在页面上看着功能清单，进度要和实际一致。
+- The feature list is an index of what already exists: a feature is listed above once its progress is not `todo`; features not started stay folded under "Not built yet". Write the progress as you go, otherwise nothing shows up. 功能清单是已经有的东西的索引：进度不是「未做」的功能才列在上面，没开始的收起在「还没做」里；边做边写进度，不然页面上什么都看不到。
 
 ## Issues / 问题
 

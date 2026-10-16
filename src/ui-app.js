@@ -68,7 +68,10 @@ function createApp(opts) {
   const app = h('div', { class: 'app' });
   const head = h('div', { class: 'head' });
   const body = h('div', { class: 'body' });
-  app.append(head, body);
+  const composerEl = h('div', { class: 'composer', style: 'display:none' });
+  app.append(head, body, composerEl);
+  // 提示条摆在输入区上面，不盖住输入区
+  if (window.ResizeObserver) new ResizeObserver(() => app.style.setProperty('--composer-h', composerEl.offsetHeight + 'px')).observe(composerEl);
   const kit = createKit(app);
   const toast = kit.toast;
 
@@ -1046,63 +1049,103 @@ function createApp(opts) {
     }).catch((e) => toast(t('could_not_save_the_draft_why', { why: errText(e) })));
   }
 
-  // 项目情况：每个功能做什么、做到哪一步
-  // 写问题的小弹窗：问题记在某个功能下面；输入 @ 可以换功能；没提交的内容留作草稿，下次打开还在
-  function openIssue(featureLine) {
+  // 写问题：多行输入固定在窗口最下面（在滚动区之外），和功能清单同屏；每条问题可以 @ 多个功能；没提交的内容留作草稿
+  let composerFeats = [];
+  let composerKey = '';
+  let composerSig = '';
+  let composerLang = '';
+  let draftTimer = 0;
+  const featIs = (a, b) => !!(a && b && a.no === b.no && a.name === b.name);
+  const composer = createIssueList({
+    kit,
+    features: () => composerFeats,
+    placeholder: () => t('describe_the_issue_you_can_several_features'),
+    onChange() {
+      clearTimeout(draftTimer);
+      draftTimer = setTimeout(() => queueDraft(composer.snapshot()), 500);
+    },
+  });
+
+  function submitIssues() {
+    const items = composer.items();
+    if (!items.length) { toast(t('write_the_issue_first')); return; }
+    if (items.some((x) => !x.fs.length)) { toast(t('choose_a_feature_for_every_issue')); return; }
+    // 一条问题 @ 了几个功能，就记到每个功能下面
+    const flat = [];
+    items.forEach((x) => x.fs.forEach((f) => flat.push({ featureLine: f.featureLine, text: x.text })));
+    // 计划书已确认、还没有功能清单：第一条问题就是开始做，问题记在新生成的功能清单里
+    if (S.doc === 'plan' && Core.getStatus(S.md) === 'approved') {
+      const before = Core.progressList(S.md);
+      startWork();
+      const after = Core.progressList(S.md);
+      flat.forEach((x) => {
+        const f = before.filter((b) => b.line === x.featureLine)[0];
+        const hit = f && after.filter((a) => a.no === f.no && a.name === f.name)[0];
+        if (hit) x.featureLine = hit.line;
+      });
+    }
+    const r = Core.addIssues(S.md, flat, Core.today());
+    if (!r.ok) { toast(t('write_the_issue_first')); return; }
+    clearTimeout(draftTimer);
+    queueDraft([]);
+    // 记问题、改进度不算改计划书
+    commit(r.md, true);
+    const keep = composer.defaultF;
+    renderAll();
+    composer.reset(composerFeats.filter((x) => featIs(x, keep))[0] || composerFeats[0] || null);
+    toast(t('added_n_issues', { n: r.added }));
+  }
+
+  // 点功能清单里的一个功能：当前这一条问题 @ 它，之后新加的也默认是它
+  function pickTarget(f) {
+    const hit = composerFeats.filter((x) => featIs(x, f))[0];
+    if (!hit) return;
+    const row = composer.focusedRow();
+    if (!row.text.trim()) row.fs = [hit];
+    else if (!row.fs.some((x) => featIs(x, hit))) row.fs.push(hit);
+    composer.defaultF = hit;
+    composer.paint();
+    renderAll();
+    row.ta.focus({ preventScroll: true });
+  }
+
+  function buildComposer() {
+    clear(composerEl);
+    composerEl.setAttribute('role', 'group');
+    composerEl.setAttribute('aria-label', t('report_an_issue'));
+    composerEl.append(h('div', { class: 'composer-in' },
+      composer.el,
+      h('div', { class: 'composer-submit' }, h('button', { type: 'button', class: 'btn primary', onclick: submitIssues }, t('submit')))));
+  }
+
+  // 只在有功能可以写问题的页面显示；输入的内容在切换页面、重画时保持不动
+  function renderComposer() {
+    const show = S.view === 'plan' && !!S.md.trim() && !planLocked() && Core.progressList(S.md).length > 0;
+    composerEl.style.display = show ? '' : 'none';
+    if (!show) return;
+    const langChanged = composerLang !== LANG;
+    if (langChanged) { composerLang = LANG; buildComposer(); }
     const feats = Core.issueList(S.md);
-    if (!feats.length) return;
-    const first = feats.filter((f) => f.featureLine === featureLine)[0] || feats[0];
-    let timer = 0;
-    const list = createIssueList({
-      kit,
-      features: () => feats,
-      placeholder: t('describe_the_issue_you_can_several_features'),
-      onChange() {
-        clearTimeout(timer);
-        timer = setTimeout(() => queueDraft(list.snapshot()), 500);
-      },
-    });
-    list.reset(first);
-    loadDraft().then((rows) => {
-      if (rows.length && !list.items().length) { draftExists = true; list.restore(rows); }
-    }, (e) => toast(t('could_not_load_the_draft_why', { why: errText(e) })));
-    kit.openModal({
-      title: t('report_an_issue'),
-      small: true,
-      body: list.el,
-      foot: (close) => [
-        h('button', { type: 'button', class: 'btn', onclick: close }, t('cancel')),
-        h('button', { type: 'button', class: 'btn primary', onclick() {
-          const items = list.items();
-          if (!items.length) { toast(t('write_the_issue_first')); return; }
-          if (items.some((x) => !x.fs.length)) { toast(t('choose_a_feature_for_every_issue')); return; }
-          // 一条问题 @ 了几个功能，就记到每个功能下面
-          const flat = [];
-          items.forEach((x) => x.fs.forEach((f) => flat.push({ featureLine: f.featureLine, text: x.text })));
-          // 计划书已确认、还没有功能清单：第一条问题就是开始做，问题记在新生成的功能清单里
-          if (S.doc === 'plan' && Core.getStatus(S.md) === 'approved') {
-            const before = Core.progressList(S.md);
-            startWork();
-            const after = Core.progressList(S.md);
-            flat.forEach((x) => {
-              const f = before.filter((b) => b.line === x.featureLine)[0];
-              const hit = f && after.filter((a) => a.no === f.no && a.name === f.name)[0];
-              if (hit) x.featureLine = hit.line;
-            });
-          }
-          const r = Core.addIssues(S.md, flat, Core.today());
-          if (!r.ok) { toast(t('write_the_issue_first')); return; }
-          close();
-          clearTimeout(timer);
-          queueDraft([]);
-          // 记问题、改进度不算改计划书
-          commit(r.md, true);
-          renderAll();
-          toast(t('added_n_issues', { n: r.added }));
-        } }, t('add')),
-      ],
-    });
-    setTimeout(() => list.focusedRow().ta.focus({ preventScroll: true }), 0);
+    const sig = feats.map((f) => f.no + '|' + f.name).join('\n');
+    const key = S.project.id + '|' + S.folder.file;
+    composerFeats = feats;
+    if (key !== composerKey) {
+      composerKey = key;
+      composerSig = sig;
+      draftExists = false;
+      composer.reset(feats[0] || null);
+      loadDraft().then((rows) => {
+        if (rows.length && !composer.items().length) { draftExists = true; composer.restore(rows); }
+      }, (e) => toast(t('could_not_load_the_draft_why', { why: errText(e) })));
+      return;
+    }
+    if (sig !== composerSig) {
+      composerSig = sig;
+      const keep = composer.defaultF ? feats.filter((x) => featIs(x, composer.defaultF))[0] : null;
+      composer.syncTargets(keep || feats[0] || null);
+    } else if (langChanged) {
+      composer.paint();
+    }
   }
 
   // 点问题的文字：变成输入框，改完点别处保存；状态前缀保留
@@ -1143,6 +1186,8 @@ function createApp(opts) {
       const r = Core.addBlock(S.md, 'feature', input.value);
       if (!r.ok) { err.textContent = nameError(r.code, 'feature'); err.style.display = ''; input.focus({ preventScroll: true }); return; }
       closeModal();
+      // 新加的功能还没做，要让它在清单里看得到
+      S.collapsed.__later = true;
       commit(r.md, true);
       afterAdd(r.line);
     };
@@ -1181,12 +1226,11 @@ function createApp(opts) {
     box.append(h('div', { class: 'status-head' },
       h('h2', { text: building ? t('feature_list') : t('project_status') }),
       h('span', { class: 'muted', text: t('done_of_total_done_doing_in_progress', { done, total: list.length, doing }) + (open ? '　' + t('n_open_issues', { n: open }) : '') }),
-      building ? h('button', { type: 'button', class: 'btn sm', onclick: openAddFeature }, '＋ ' + t('add_a_feature')) : null,
-      h('button', { type: 'button', class: 'btn sm', onclick: () => openIssue(list[0].line) }, '＋ ' + t('report_an_issue'))));
+      building ? h('button', { type: 'button', class: 'btn sm', onclick: openAddFeature }, t('add_a_feature')) : null));
     box.append(h('div', { class: 'bar-track' },
       h('span', { class: 'bar-done', style: 'width:' + (done / list.length) * 100 + '%' }),
       h('span', { class: 'bar-doing', style: 'width:' + (doing / list.length) * 100 + '%' })));
-    list.forEach((f) => {
+    const addRow = (f) => {
       const chip = h('button', { type: 'button', class: 'prog ' + f.status, title: t('click_to_change_progress') }, W[f.status]);
       chip.addEventListener('click', () => {
         const next = Core.nextProgress(f.status);
@@ -1202,11 +1246,13 @@ function createApp(opts) {
         renderAll();
       });
       const mine = (issues.filter((x) => x.featureLine === f.line)[0] || { items: [] }).items;
+      // 功能清单里点名字是选中它去写问题；计划书阶段点名字跳到它在计划书里的位置
+      const label = (f.no ? f.no + ' ' : '') + f.name;
+      const name = building
+        ? h('button', { type: 'button', class: 'ref' + (featIs(composer.defaultF, f) ? ' on' : ''), title: t('click_to_pick_the_feature'), onclick: () => pickTarget(f) }, label)
+        : h('button', { type: 'button', class: 'ref', onclick() { jumpTo('[data-no="' + f.no + '"]'); } }, label);
       box.append(h('div', { class: 'status-row' },
-        h('div', { class: 'status-name' },
-          h('button', { type: 'button', class: 'ref', onclick() { jumpTo('[data-no="' + f.no + '"]'); } }, (f.no ? f.no + ' ' : '') + f.name),
-          f.what ? h('span', { class: 'muted', text: f.what }) : null),
-        h('button', { type: 'button', class: 'btn sm', title: t('report_an_issue'), 'aria-label': t('report_an_issue'), onclick: () => openIssue(f.line) }, '＋'),
+        h('div', { class: 'status-name' }, name, f.what ? h('span', { class: 'muted', text: f.what }) : null),
         chip));
       // 每条问题：点状态在 待处理 / 处理中 / 已修 之间切换；点文字可以改；AI 处理时这里实时变化
       mine.forEach((it) => {
@@ -1228,7 +1274,19 @@ function createApp(opts) {
             toast(t('deleted'), { label: t('undo'), run: () => undo() });
           } }, '✕')));
       });
-    });
+    };
+    // 功能清单是已经有的东西：做出来的在上面，还没做的收起放在下面；计划书阶段全部列出
+    // 功能下已经记了问题的，即使还没做也列在上面，不然问题看不到
+    const hasIssues = (f) => ((issues.filter((x) => x.featureLine === f.line)[0] || { items: [] }).items.length > 0);
+    const built = building ? list.filter((x) => x.status !== 'todo' || hasIssues(x)) : list;
+    const later = building ? list.filter((x) => x.status === 'todo' && !hasIssues(x)) : [];
+    built.forEach(addRow);
+    if (building && !built.length) box.append(h('p', { class: 'muted', text: t('nothing_built_yet') }));
+    if (later.length) {
+      const openLater = S.collapsed.__later === true;
+      box.append(h('button', { type: 'button', class: 'link later-toggle', onclick() { S.collapsed.__later = !openLater; renderAll(); } }, (openLater ? '▾ ' : '▸ ') + t('not_built_yet', { n: later.length })));
+      if (openLater) later.forEach(addRow);
+    }
     return box;
   }
 
@@ -1703,6 +1761,7 @@ function createApp(opts) {
   function renderAll() {
     renderHead();
     renderBody();
+    renderComposer();
   }
 
   // ---------- 快捷键与自动更新 ----------

@@ -209,17 +209,17 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .modal-foot > * { margin: 0 0.5em 0.5em 0; }
 .modal textarea.in.big { overflow-y: auto; }
 
-.toast { position: absolute; z-index: var(--z-toast); left: 0.8em; right: 0.8em; bottom: 0.8em; margin: 0 auto; max-width: 30em; display: flex; align-items: center; background: var(--ink); color: var(--paper); border-radius: 0.55em; padding: 0.45em 0.5em 0.45em 0.85em; cursor: pointer; }
+.toast { position: absolute; z-index: var(--z-toast); left: 0.8em; right: 0.8em; bottom: calc(var(--composer-h, 0px) + 0.8em); margin: 0 auto; max-width: 30em; display: flex; align-items: center; background: var(--ink); color: var(--paper); border-radius: 0.55em; padding: 0.45em 0.5em 0.45em 0.85em; cursor: pointer; }
 .toast span { flex: 1; overflow-wrap: anywhere; }
 .toast .btn { background: var(--paper); color: var(--ink); border-color: var(--paper); flex: none; margin-left: 0.6em; }
 
 /* 滚动条：黑色细条，没有箭头 */
-.body::-webkit-scrollbar, .pos-list::-webkit-scrollbar, .modal-body::-webkit-scrollbar, .pop::-webkit-scrollbar { width: 0.6em; height: 0.6em; }
-.body::-webkit-scrollbar-track, .pos-list::-webkit-scrollbar-track, .modal-body::-webkit-scrollbar-track, .pop::-webkit-scrollbar-track { background: var(--paper); }
-.body::-webkit-scrollbar-thumb, .pos-list::-webkit-scrollbar-thumb, .modal-body::-webkit-scrollbar-thumb, .pop::-webkit-scrollbar-thumb { background: var(--ink); border-radius: 1em; border: 0.15em solid var(--paper); }
-.body::-webkit-scrollbar-button, .pos-list::-webkit-scrollbar-button, .modal-body::-webkit-scrollbar-button, .pop::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.body::-webkit-scrollbar, .composer::-webkit-scrollbar, .pos-list::-webkit-scrollbar, .modal-body::-webkit-scrollbar, .pop::-webkit-scrollbar { width: 0.6em; height: 0.6em; }
+.body::-webkit-scrollbar-track, .composer::-webkit-scrollbar-track, .pos-list::-webkit-scrollbar-track, .modal-body::-webkit-scrollbar-track, .pop::-webkit-scrollbar-track { background: var(--paper); }
+.body::-webkit-scrollbar-thumb, .composer::-webkit-scrollbar-thumb, .pos-list::-webkit-scrollbar-thumb, .modal-body::-webkit-scrollbar-thumb, .pop::-webkit-scrollbar-thumb { background: var(--ink); border-radius: 1em; border: 0.15em solid var(--paper); }
+.body::-webkit-scrollbar-button, .composer::-webkit-scrollbar-button, .pos-list::-webkit-scrollbar-button, .modal-body::-webkit-scrollbar-button, .pop::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 @supports not selector(::-webkit-scrollbar) {
-  .body, .pos-list, .modal-body, .pop { scrollbar-width: thin; scrollbar-color: #000000 #ffffff; }
+  .body, .composer, .pos-list, .modal-body, .pop { scrollbar-width: thin; scrollbar-color: #000000 #ffffff; }
 }
 
 /* 项目情况 */
@@ -317,4 +317,11 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .credit { display: flex; align-items: center; gap: 0.8em; margin: 2.4em 0 0; }
 .credit-avatar { flex: none; width: 48px; height: 48px; border-radius: 0.4em; object-fit: cover; }
 .credit-text { min-width: 0; font-size: 0.9em; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
+
+/* 写问题：固定在窗口最下面，在滚动区之外 */
+.composer { flex: none; max-height: 45%; overflow-y: auto; overscroll-behavior: contain; border-top: 2px solid var(--ink); background: var(--paper); padding: 0.5em 0.9em 0.1em; }
+.composer-in { position: relative; max-width: 46em; margin: 0 auto; }
+.composer-submit { position: absolute; right: 0; bottom: 0.3em; }
+.later-toggle { display: block; margin: 0.5em 0 0.2em; }
+.ref.on { background: var(--ink); color: var(--paper); border-radius: 0.3em; padding: 0 0.35em; text-decoration: none; }
 

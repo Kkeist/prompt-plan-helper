@@ -84,8 +84,8 @@ function createKit(appEl) {
   return { closePop, openPop, popItem, openModal, toast, escape };
 }
 
-// 列表式写问题：点「＋ 加一条」或回车加一条，每一条是一个输入框，随时可以改、可以补。
-// 每一条可以 @ 多个功能（点「＋ @」或输入 @），行里的 data 留给调用方放自己的东西（比如选取的多个元素）。
+// 列表式写问题：点「添加一条」或回车加一条，每一条是一个输入框，随时可以改、可以补。
+// 每一条可以 @ 多个功能（点「@ 选择功能」或输入 @），行里的 data 留给调用方放自己的东西（比如选取的多个元素）。
 // o: { kit, features: () => [{ no, name }]（可以没有功能，那就没有 @）, placeholder（文字或函数）, onTarget(f),
 //      rowTools(row, repaint)（每条上方的额外按钮）, rowExtra(row, repaint)（每条下方的额外内容）, onLayout(),
 //      onChange()（用户改了内容；程序自己的 reset / restore / syncTargets 不触发） }
@@ -172,7 +172,7 @@ function createIssueList(o) {
         row.fs.forEach((f) => top.append(h('span', { class: 'ftag' },
           h('button', { type: 'button', class: 'btn sm target', title: t('click_to_change_the_feature'), onclick(e) { choose(row, e.currentTarget); } }, '@ ' + label(f)),
           h('button', { type: 'button', class: 'x', title: t('remove_this_feature'), 'aria-label': t('remove_this_feature'), onclick() { row.fs = row.fs.filter((x) => !same(x, f)); paint(); } }, '✕'))));
-        const more = h('button', { type: 'button', class: 'btn sm', title: t('choose_features'), onclick() { choose(row, more); } }, '＋ @');
+        const more = h('button', { type: 'button', class: 'btn sm', title: t('choose_features'), onclick() { choose(row, more); } }, '@ ' + t('choose_features'));
         top.append(more);
       }
       if (o.rowTools) o.rowTools(row, paint).forEach((x) => { if (x) top.append(x); });
@@ -185,7 +185,7 @@ function createIssueList(o) {
       const extra = o.rowExtra ? o.rowExtra(row, paint) : null;
       el.append(h('div', { class: 'irow' }, top, row.ta, extra));
     });
-    el.append(h('button', { type: 'button', class: 'btn sm add-row', onclick() { add(api.defaultF ? [api.defaultF] : []); } }, '＋ ' + t('add_an_issue')));
+    el.append(h('button', { type: 'button', class: 'btn sm add-row', onclick() { add(api.defaultF ? [api.defaultF] : []); } }, t('add_an_issue')));
     setTimeout(() => growAll(el), 0);
     if (o.onLayout) o.onLayout();
     changed();

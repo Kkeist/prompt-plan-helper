@@ -1,6 +1,10 @@
 {
   "name": "中文",
   "ui": {
+    "submit": "提交",
+    "not_built_yet": "还没做 {n} 项",
+    "nothing_built_yet": "还没有做出来的功能。",
+    "click_to_pick_the_feature": "点击选中，在下面写问题",
     "credit_by": "哐哐哐況 制作。",
     "credit_same": "全网同名，更多好玩的请前往→",
     "credit_link": "哐哐的个人站。",
@@ -196,7 +200,7 @@
     "click_to_change_the_feature": "点击更换功能",
     "remove_this_feature": "去掉这个功能",
     "choose_features": "选择功能",
-    "add_an_issue": "加一条",
+    "add_an_issue": "添加一条",
     "copied": "已复制。",
     "the_browser_does_not_allow_automatic_copying": "浏览器不允许自动复制，全文已选中，请按 Ctrl+C 复制。",
     "full_text": "全文",

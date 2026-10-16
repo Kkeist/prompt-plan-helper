@@ -96,7 +96,9 @@ try {
   }
   await page2.shot(join(root, 'preview', '11-悬浮窗联动.png'));
   ok('悬浮窗显示 @ 功能', /^@ 4\.1/.test(target), target);
-  ok('显示计划书名称', /番茄钟/.test(await w2('return r.querySelector(".fb-body").innerText')));
+  let shownName = '';
+  for (let i = 0; i < 40 && !/番茄钟/.test(shownName); i++) { await page2.sleep(100); shownName = await w2('return r.querySelector(".fb-body").innerText'); }
+  ok('显示计划书名称', /番茄钟/.test(shownName), shownName);
   await w2('var t=r.querySelector("textarea");t.focus();');
   await page2.insert('开始按钮没有反应');
   await w2('r.querySelectorAll("button").forEach(function(b){if(b.textContent==="记到计划书")b.click()})');

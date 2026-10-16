@@ -71,7 +71,7 @@ function createFeedback(opts) {
     },
     // 每一条可以带多个元素：行上的按钮再选一个，下面一个元素一行，可以单独去掉
     rowTools(row) {
-      return [h('button', { type: 'button', class: 'btn sm', onclick: () => pickInto(row) }, '＋ ' + t('pick_an_element'))];
+      return [h('button', { type: 'button', class: 'btn sm', onclick: () => pickInto(row) }, t('pick_an_element'))];
     },
     rowExtra(row, repaint) {
       const els = row.data.elements || [];

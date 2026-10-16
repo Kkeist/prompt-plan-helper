@@ -1,6 +1,10 @@
 {
   "name": "English",
   "ui": {
+    "submit": "Submit",
+    "not_built_yet": "Not built yet: {n}",
+    "nothing_built_yet": "Nothing has been built yet.",
+    "click_to_pick_the_feature": "Click to choose it, then write below",
     "credit_by": "created by KKeist",
     "credit_same": "",
     "credit_link": "Personal site",
@@ -196,7 +200,7 @@
     "click_to_change_the_feature": "Click to change the feature",
     "remove_this_feature": "Remove this feature",
     "choose_features": "Choose features",
-    "add_an_issue": "Add an issue",
+    "add_an_issue": "Add another",
     "copied": "Copied.",
     "the_browser_does_not_allow_automatic_copying": "The browser does not allow automatic copying. The text is selected; press Ctrl+C.",
     "full_text": "Full text",

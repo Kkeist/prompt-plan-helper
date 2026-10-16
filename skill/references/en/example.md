@@ -13,7 +13,7 @@ Outcome: A plan an AI can follow directly, and a separate feature list that is k
 Write the plan: give the idea to the AI → the AI writes the plan → read and edit it on the page → once nothing is TBD and it is confirmed, building starts
 Fill it in yourself: start a blank plan or view the example → click each block and follow the hints in the box → fill in what is TBD → confirm
 Check progress: once building has started, open the feature list → see the progress of each feature and its open issues → progress updates by itself when the AI finishes a feature
-Report an issue: in the feature list click the "+" next to a feature, or open the floating window on a web page → write the issue, type @ to switch feature → the AI reads it and fixes it
+Report an issue: write it in the input at the bottom of the window (several lines allowed), type @ to switch feature, or use the floating window on a web page → press Submit → the AI reads it and fixes it
 Find a folder: press the desktop shortcut → a small window opens at the bottom right of the screen listing recent folders → copy the path to open it in a command line, or open its plan
 Mark what to change: open the small window on the page being built → pick an element, select a region or record the current page → write one line → copy it to the AI
 
@@ -24,7 +24,7 @@ Mark what to change: open the small window on the page being built → pick an e
 Page purpose: Before building starts it is the plan; once building starts there is a separate feature list and the initial plan no longer changes. View and edit the content, and see the progress and issues of each feature.
 Page elements:
 - Tabs: one per open project, which can be closed and added; the desktop version has an extra "Recent" tab
-- Project status or feature list: what each feature does, its progress and open issues; in the feature list each feature has a "+" for writing an issue
+- Project status or feature list: what each feature does, its progress and open issues; the feature list shows what is already built and folds what is not built yet; click a feature name to choose it, then write the issue in the input at the bottom of the window
 - Each block of content: click it to turn it into a large box, click outside to save; the box shows what the block should say, with an example
 - Count of items still to fill in: click to jump to the next one
 - Confirm and start: confirms once nothing is TBD
@@ -82,7 +82,7 @@ Progress: Done
 
 Feature description: Records an issue under a feature in the feature list; the AI reads it and fixes it, and it is then marked "Fixed".
 Acceptance criteria:
-- Click the "+" next to a feature: a small window opens with that feature selected; typing @ switches to another feature
+- The input at the bottom of the window: write issues as a list, press "Add another" or Enter for another line, each line can @ several features, press Submit to record them under the chosen features
 - Add: the issue is written under "Issues" in that feature block, with the date
 - Fixed: clicking it prefixes the issue with "Fixed:" and removes it from the open list
 - Delete: it can be undone
