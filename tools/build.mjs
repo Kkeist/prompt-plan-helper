@@ -66,6 +66,7 @@ const parts = [
   read('src', 'ui-base.js'),
   read('src', 'ui-kit.js'),
   read('src', 'page-tools.js'),
+  read('src', 'page-parts.js'),
   read('src', 'ui-app.js'),
   read('src', 'ui-hub.js'),
   read('src', 'ui-widget.js'),

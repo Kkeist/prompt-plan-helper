@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>个人页面示例</title>
+<style>body{font-family:sans-serif;margin:2rem}</style>
+</head>
+<body>
+<h1>个人页面示例</h1>
+<button id="start">开始</button>
+<button id="pause" aria-label="暂停键">暂停</button>
+<p id="out">弹性 0.4</p>
+<script>
+window.SHUPIAN_ME = {
+  parts: [{ name: '开始按钮', selector: '#start' }],
+  tune: [{ key: 'bounce', label: '弹性', min: 0, max: 1, step: 0.05, value: 0.4, apply: function (v) { document.getElementById('out').textContent = '弹性 ' + v; } }],
+};
+</script>
+<script src="/web/shupian.js"></script>
+</body>
+</html>

@@ -1,6 +1,15 @@
 {
   "name": "English",
   "ui": {
+    "parts": "Parts",
+    "part": "part",
+    "circle_a_part": "Pick a part",
+    "part_name": "Part name",
+    "remove_this_part": "Remove this part",
+    "describe_the_issue_you_can_several_parts": "Describe the issue. You can @ several parts.",
+    "where_part": "Part: ",
+    "tune_title": "Adjustable values",
+    "tuned_value": "Changed value: {label} = {value} (was {was})",
     "submit": "Submit",
     "not_built_yet": "Not built yet: {n}",
     "nothing_built_yet": "Nothing has been built yet.",

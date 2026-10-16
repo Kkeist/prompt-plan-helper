@@ -9,7 +9,7 @@ function createFeedback(opts) {
   app.append(body);
   const kit = createKit(app);
   // 当前页面的信息和截图，整批问题共用
-  const S = { info: null, shot: null };
+  const S = { info: null, shot: null, naming: null };
   // 计划书通道：off（不可用，why 说明原因）、loading、ready、empty（没有计划书或没有功能）
   // projects 里每一项是一份计划书：{ path, name（文件夹名）, file, summary, multi（这个文件夹里有多份）}
   const link = { state: Link.available ? 'loading' : 'off', why: '', projects: [], project: null, features: [], target: null };
@@ -62,9 +62,10 @@ function createFeedback(opts) {
 
   const list = createIssueList({
     kit,
-    features: () => (link.state === 'ready' ? link.features : []),
-    placeholder: () => (link.state === 'ready' ? t('describe_the_issue_you_can_several_features') : t('describe_what_to_change')),
-    onTarget(f) { link.target = f; rememberTarget(); },
+    features: () => (link.state === 'ready' ? link.features : Parts.list()),
+    placeholder: () => (link.state === 'ready' ? t('describe_the_issue_you_can_several_features')
+      : Parts.list().length ? t('describe_the_issue_you_can_several_parts') : t('describe_what_to_change')),
+    onTarget(f) { if (link.state === 'ready') { link.target = f; rememberTarget(); } },
     onChange() {
       clearTimeout(draftTimer);
       draftTimer = setTimeout(() => queueDraft(list.snapshot()), 500);
@@ -121,8 +122,108 @@ function createFeedback(opts) {
       element: it ? numbered(elementsOf(it), (e) => e.path) : '', styles: it ? numbered(elementsOf(it), (e) => e.styles) : '',
       summary: first ? infoLines() : [], errors: first ? errors : [], shot: first ? shot : '',
     }, LANG);
-    if (items.length <= 1) return one(items[0], true);
-    return items.map((it, i) => (i + 1) + '. ' + (it.fs.length ? it.fs.map((f) => '@ ' + featLabel(f)).join(' ') : '') + '\n' + one(it, i === 0)).join('\n');
+    const text = items.length <= 1 ? one(items[0], true)
+      : items.map((it, i) => (i + 1) + '. ' + (it.fs.length ? it.fs.map((f) => '@ ' + featLabel(f)).join(' ') : '') + '\n' + one(it, i === 0)).join('\n');
+    return extraLines(items).concat(text).join('\n');
+  }
+
+  // 没有连计划书时：被 @ 的部件在页面上的位置，和调过的参数
+  function extraLines(items) {
+    if (link.state === 'ready') return [];
+    const out = [];
+    const seen = [];
+    items.forEach((it) => it.fs.forEach((f) => {
+      if (f.sel && seen.indexOf(f.name) < 0) { seen.push(f.name); out.push(t('where_part') + f.name + '（' + f.sel + '）'); }
+    }));
+    Tune.changed().forEach((c) => out.push(t('tuned_value', { label: c.label, value: c.value, was: c.was })));
+    return out.length ? [out.join('\n')] : [];
+  }
+
+  // ---------- 本页部件：没有连计划书时，这个网页上有什么 ----------
+
+  const samePart = (a, b) => !!(a && b && a.name === b.name);
+  const keepTarget = () => { const cur = list.defaultF; return cur ? Parts.list().filter((x) => samePart(x, cur))[0] || null : null; };
+
+  async function circlePart() {
+    const r = await tools.pick();
+    if (!r) return;
+    S.naming = { sel: r.sel, name: r.label };
+    render();
+    setTimeout(() => { const i = body.querySelector('.part-name'); if (i) { i.focus({ preventScroll: true }); i.select(); } }, 0);
+  }
+
+  function savePart(name) {
+    const v = name.trim();
+    if (!v) { kit.toast(t('the_name_cannot_be_empty')); return; }
+    if (Parts.list().some((x) => x.declared && x.name === v)) { kit.toast(t('there_is_already_a_what_with_this_name', { what: t('part') })); return; }
+    if (!Parts.add(v, S.naming.sel)) { kit.toast(t('browser_storage_is_full_and_the_latest')); return; }
+    S.naming = null;
+    list.syncTargets(keepTarget());
+    render();
+  }
+
+  function removePart(p) {
+    Parts.remove(p.name);
+    list.syncTargets(keepTarget());
+    render();
+  }
+
+  // 点部件：当前这一条问题 @ 它，之后新加的也默认是它
+  function usePart(p) {
+    const row = list.focusedRow();
+    if (!row.text.trim()) row.fs = [p];
+    else if (!row.fs.some((x) => samePart(x, p))) row.fs.push(p);
+    list.defaultF = p;
+    list.paint();
+    row.ta.focus({ preventScroll: true });
+  }
+
+  function partsBlock() {
+    if (link.state === 'ready') return null;
+    const box = h('div', { class: 'parts' });
+    box.append(h('div', { class: 'row tight' },
+      h('span', { class: 'muted', text: t('parts') }),
+      h('button', { type: 'button', class: 'btn sm', onclick: circlePart }, t('circle_a_part'))));
+    if (S.naming) {
+      const input = h('input', { class: 'in part-name', placeholder: t('part_name'), 'aria-label': t('part_name'), value: S.naming.name });
+      input.addEventListener('keydown', (e) => {
+        if (e.isComposing) return;
+        if (e.key === 'Enter') { e.preventDefault(); savePart(input.value); }
+        if (e.key === 'Escape') { e.preventDefault(); S.naming = null; render(); }
+      });
+      box.append(h('div', { class: 'row tight' }, input,
+        h('button', { type: 'button', class: 'btn sm primary', onclick: () => savePart(input.value) }, t('add')),
+        h('button', { type: 'button', class: 'btn sm', onclick() { S.naming = null; render(); } }, t('cancel'))));
+    }
+    const on = list.defaultF;
+    const chips = Parts.list().map((p) => h('span', { class: 'ftag part' },
+      h('button', { type: 'button', class: 'btn sm' + (samePart(on, p) ? ' primary' : ''), title: p.sel, onclick: () => usePart(p) }, p.name),
+      p.declared ? null : h('button', { type: 'button', class: 'x', title: t('remove_this_part'), 'aria-label': t('remove_this_part'), onclick: () => removePart(p) }, '✕')));
+    if (chips.length) box.append(h('div', { class: 'part-list' }, chips));
+    return box;
+  }
+
+  // 网页声明的可调参数：滑块加数字框，调了立刻交给网页，并记在这个浏览器里
+  function tuneBlock() {
+    const items = Tune.list();
+    if (!items.length) return null;
+    const box = h('div', { class: 'tune' }, h('div', { class: 'muted', text: t('tune_title') }));
+    items.forEach((x) => {
+      const name = x.label || x.key;
+      const step = x.step || (x.max - x.min) / 100;
+      const show = (v) => String(Number(Number(v).toFixed(4)));
+      const range = h('input', { class: 'tune-range', type: 'range', min: x.min, max: x.max, step, value: Tune.value(x), 'aria-label': name });
+      const num = h('input', { class: 'in tune-num', type: 'text', inputmode: 'decimal', 'aria-label': name, value: show(Tune.value(x)) });
+      range.addEventListener('input', () => { num.value = show(Tune.set(x, range.value)); });
+      num.addEventListener('input', () => { num.value = num.value.replace(/[^0-9.-]/g, ''); });
+      num.addEventListener('change', () => {
+        const v = Tune.set(x, num.value);
+        num.value = show(v);
+        range.value = String(v);
+      });
+      box.append(h('div', { class: 'tune-row' }, h('span', { class: 'tune-label', text: name }), range, num));
+    });
+    return box;
   }
 
   async function loadPlan() {
@@ -285,6 +386,7 @@ function createFeedback(opts) {
         : link.why === 'unpaired' ? t('open_the_desktop_window_first_to_add_issues') : t('the_desktop_window_did_not_respond_only');
       body.append(h('p', { class: 'hint', text: why }));
     }
+    body.append(partsBlock(), tuneBlock());
     body.append(list.el);
     body.append(h('div', { class: 'row' },
       ready ? h('button', { type: 'button', class: 'btn primary', onclick: record }, t('add_to_plan')) : null,

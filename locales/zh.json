@@ -1,6 +1,15 @@
 {
   "name": "中文",
   "ui": {
+    "parts": "部件",
+    "part": "部件",
+    "circle_a_part": "圈选部件",
+    "part_name": "部件名称",
+    "remove_this_part": "去掉这个部件",
+    "describe_the_issue_you_can_several_parts": "写下问题，可以 @ 多个部件。",
+    "where_part": "部件：",
+    "tune_title": "可调参数",
+    "tuned_value": "调过的参数：{label} = {value}（原来 {was}）",
     "submit": "提交",
     "not_built_yet": "还没做 {n} 项",
     "nothing_built_yet": "还没有做出来的功能。",

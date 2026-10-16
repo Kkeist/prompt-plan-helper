@@ -325,3 +325,18 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .later-toggle { display: block; margin: 0.5em 0 0.2em; }
 .ref.on { background: var(--ink); color: var(--paper); border-radius: 0.3em; padding: 0 0.35em; text-decoration: none; }
 
+/* 本页部件和可调参数 */
+.parts { margin-top: 0.4em; }
+.part-list { display: flex; flex-wrap: wrap; margin-top: 0.3em; }
+.part-list .ftag { margin: 0 0.35em 0.35em 0; }
+.part-name { flex: 1; min-width: 0; }
+.tune { margin-top: 0.5em; }
+.tune-row { display: flex; align-items: center; margin-top: 0.3em; }
+.tune-label { flex: none; max-width: 30%; margin-right: 0.5em; overflow-wrap: anywhere; }
+.tune-range { flex: 1; min-width: 0; margin: 0 0.5em 0 0; -webkit-appearance: none; appearance: none; height: 1.2em; background: transparent; }
+.tune-range::-webkit-slider-runnable-track { height: 2px; background: var(--ink); }
+.tune-range::-moz-range-track { height: 2px; background: var(--ink); }
+.tune-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 1em; height: 1em; margin-top: -0.5em; border-radius: 50%; border: 2px solid var(--ink); background: var(--paper); }
+.tune-range::-moz-range-thumb { width: 0.8em; height: 0.8em; border-radius: 50%; border: 2px solid var(--ink); background: var(--paper); }
+.tune-num { flex: none; width: 4.5em; padding: 0.1em 0.4em; }
+

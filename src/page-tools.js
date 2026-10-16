@@ -151,8 +151,11 @@ function elementInfo(el) {
   const props = ['font-size', 'font-weight', 'color', 'background-color', 'padding', 'margin', 'border-radius', 'display'];
   const styles = props.map((p) => p + ' ' + cs.getPropertyValue(p)).concat(['width ' + Math.round(r.width) + 'px', 'height ' + Math.round(r.height) + 'px']).join('；');
   const text = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const label = (el.getAttribute('aria-label') || text || el.id || el.tagName.toLowerCase()).replace(/\s+/g, ' ').trim().slice(0, 20);
   return {
     path: elementPath(el) + (text ? t('element_text', { text }) : ''),
+    sel: elementPath(el),
+    label,
     styles,
   };
 }

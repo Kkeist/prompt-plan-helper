@@ -218,8 +218,10 @@ function mountFloat(autoOpen) {
       chrome.runtime.sendMessage({ shupian: 'pair', port: location.port, token: SERVER.token }, () => void chrome.runtime.lastError);
       return;
     }
+    if (!page && !meAllowed()) return;
     const api = page ? mountPage(page) : mountFloat(!!want || document.documentElement.hasAttribute('data-shupian-open'));
     if (!api) return;
+    if (!page) Tune.restore();
     window.Shupian = api;
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
       chrome.runtime.onMessage.addListener((msg) => {

@@ -91,7 +91,8 @@ const staticPort = 14900 + Math.floor(Math.random() * 400);
 const staticSrv = spawn(process.execPath, [join(root, 'tools', 'serve.mjs'), '.'], { stdio: ['ignore', 'pipe', 'inherit'], env: Object.assign({}, process.env, { PORT: String(staticPort) }) });
 const base = await new Promise((resolve) => staticSrv.stdout.once('data', (d) => resolve(String(d).trim())));
 
-const chrome = await launch(join(shots, '_chrome.json'));
+// away.test 指向本机：用来检查「不在本机的网页」
+const chrome = await launch(join(shots, '_chrome.json'), ['--host-resolver-rules=MAP away.test 127.0.0.1']);
 const Q = (sel, text, exact) => '__one(' + JSON.stringify(sel) + ',' + JSON.stringify(text === undefined ? null : text) + ',' + (exact ? 'true' : 'false') + ')';
 function helpers(page) {
   return {
@@ -729,9 +730,6 @@ try {
 
   const errs = page.logs.concat(win.logs);
   ok('页面形态全程没有脚本报错', errs.length === 0, errs.slice(0, 5));
-} catch (e) {
-  fails.push('测试中断：' + (e && e.stack ? e.stack : e));
-  console.log('中断：' + (e && e.stack ? e.stack : e));
 
   console.log('标签放不下时换行，每个标签都完整显示');
   await page.resize(280, 560);
@@ -739,6 +737,82 @@ try {
   const tabInfo = await page.eval('(function(){var bar=__one(".tabbar");var vw=innerWidth;var rs=Array.from(__deep(".tabbar .tab, .tabbar .chip")).map(function(e){var r=e.getBoundingClientRect();return {l:r.left,r:r.right}});return {n:rs.length,inside:rs.every(function(r){return r.l>=-0.5&&r.r<=vw+0.5}),hscroll:bar.scrollWidth-bar.clientWidth}})()');
   ok('标签多了换行：每个都完整在窗口里，没有横向滚动', tabInfo.n >= 5 && tabInfo.inside && tabInfo.hscroll <= 0, tabInfo);
   await page.shot(join(shots, '12-标签换行-280.png'));
+
+  // ================= 个人版：网页自己带的部件声明和可调参数 =================
+  console.log('悬浮窗：本页部件和可调参数');
+  const mpage = await chrome.newPage();
+  await mpage.init(DEEP);
+  await mpage.resize(1280, 800);
+  const HM = helpers(mpage);
+  await mpage.goto(base + 'tests/fixtures/me.html');
+  // 同一个源下前面的用例留过草稿：先清掉再重新打开
+  await mpage.eval('Object.keys(localStorage).filter(function(k){return /:draft/.test(k)}).forEach(function(k){localStorage.removeItem(k)})');
+  await mpage.goto(base + 'tests/fixtures/me.html');
+  await mpage.eval('window.__clip = null; Object.defineProperty(navigator, "clipboard", { value: { writeText: function (t) { window.__clip = t; return Promise.resolve(); }, write: function () { return Promise.resolve(); } }, configurable: true })');
+  ok('声明了部件的页面在本机打开：悬浮按钮出现', await mpage.eval('!!' + fq('.fab')));
+  await mpage.key('S', 1 | 8);
+  await mpage.sleep(300);
+  ok('没有连计划书：显示声明的部件', await HM.exists('.part-list button', '开始按钮', true), await HM.text('.parts'));
+  ok('声明的部件没有去掉按钮', (await HM.count('.part-list .x')) === 0);
+  ok('显示可调参数：名称、滑块、数字框', (await HM.exists('.tune-label', '弹性')) && (await HM.exists('.tune-range')) && (await mpage.eval('__one(".tune-num").value')) === '0.4');
+  await mpage.click(fq('.part-list button', '开始按钮', true));
+  await mpage.sleep(150);
+  ok('点部件：当前这一条问题 @ 它', /开始按钮/.test((await HM.text('.ilist .target')) || ''), await HM.text('.ilist .target'));
+  // 圈选页面上的一个按钮
+  await mpage.click(fq('button', '圈选部件', true));
+  await mpage.sleep(200);
+  const mePt = await mpage.eval('(function(){var r=document.getElementById("pause").getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()');
+  await mpage.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: mePt.x, y: mePt.y });
+  await mpage.sleep(100);
+  await mpage.clickAt(mePt.x, mePt.y);
+  await mpage.sleep(300);
+  ok('圈选之后问名称，默认是按钮自己的名字', (await mpage.eval('__one(".part-name").value')) === '暂停键', await mpage.eval('__one(".part-name").value'));
+  await mpage.key('Enter');
+  await mpage.sleep(200);
+  ok('圈选的部件出现在清单里，可以去掉', (await HM.exists('.part-list button', '暂停键', true)) && (await HM.count('.part-list .x')) === 1);
+  // 调参数
+  await mpage.eval('(function(){var n=__one(".tune-num");n.value="0.8";n.dispatchEvent(new Event("change",{bubbles:true}))})()');
+  await mpage.sleep(150);
+  ok('改数字框：交给了页面，滑块跟着动', (await mpage.eval('document.getElementById("out").textContent')) === '弹性 0.8' && (await mpage.eval('__one(".tune-range").value')) === '0.8');
+  await mpage.eval('(function(){var n=__one(".tune-num");n.value="9";n.dispatchEvent(new Event("change",{bubbles:true}))})()');
+  await mpage.sleep(150);
+  ok('超出范围：收回到最大值', (await mpage.eval('__one(".tune-num").value')) === '1');
+  await mpage.eval('(function(){var n=__one(".tune-num");n.value="0.8";n.dispatchEvent(new Event("change",{bubbles:true}))})()');
+  await mpage.sleep(100);
+  // 写一条问题并复制
+  await mpage.click(fq('.ilist textarea'));
+  await mpage.insert('点了没反应');
+  await mpage.click(fq('button', '复制文字', true));
+  await mpage.sleep(300);
+  const meClip = await mpage.eval('window.__clip');
+  ok('复制的文字里有问题、被 @ 的部件和它在页面上的位置', /点了没反应/.test(meClip) && /部件：开始按钮（#start）/.test(meClip) && !/标题字号/.test(meClip), meClip);
+  ok('复制的文字里有调过的参数和原来的值', /弹性 = 0\.8（原来 0\.4）/.test(meClip), meClip);
+  await mpage.shot(join(shots, '13-本页部件-1280.png'));
+  // 刷新：圈选的部件和调过的参数还在，参数自动再用一遍
+  await mpage.goto(base + 'tests/fixtures/me.html');
+  await mpage.sleep(300);
+  ok('刷新之后调过的参数自动再用一遍', (await mpage.eval('document.getElementById("out").textContent')) === '弹性 0.8', await mpage.eval('document.getElementById("out").textContent'));
+  await mpage.key('S', 1 | 8);
+  await mpage.sleep(300);
+  ok('刷新之后圈选的部件还在', await HM.exists('.part-list button', '暂停键', true));
+  await mpage.click(fq('.part-list .x'));
+  await mpage.sleep(150);
+  ok('去掉圈选的部件', !(await HM.exists('.part-list button', '暂停键', true)));
+  // 发布出去的页面：不在本机、地址没带开关时不出现；带 ?shupian=1 才出现
+  const meAway = base.replace('127.0.0.1', 'away.test') + 'tests/fixtures/me.html';
+  await mpage.goto(meAway);
+  await mpage.sleep(300);
+  const meAwayLoaded = (await mpage.eval('document.title')) === '个人页面示例';
+  ok('不在本机的页面：页面能打开，但没有悬浮按钮', meAwayLoaded && !(await mpage.eval('!!' + fq('.fab'))), meAwayLoaded);
+  await mpage.goto(meAway + '?shupian=1');
+  await mpage.sleep(300);
+  ok('地址带 ?shupian=1：出现悬浮按钮', await mpage.eval('!!' + fq('.fab')));
+  await mpage.goto(meAway);
+  await mpage.sleep(300);
+  ok('打开过开关的浏览器：之后不带参数也出现', await mpage.eval('!!' + fq('.fab')));
+} catch (e) {
+  fails.push('测试中断：' + (e && e.stack ? e.stack : e));
+  console.log('中断：' + (e && e.stack ? e.stack : e));
 } finally {
   await chrome.close();
   staticSrv.kill();
