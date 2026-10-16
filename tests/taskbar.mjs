@@ -63,6 +63,14 @@ try {
   for (let i = 0; i < 60 && !again.found; i++) { await sleep(250); again = state(); }
   for (let i = 0; i < 20 && !again.toolWindow; i++) { await sleep(250); again = state(); }
   ok('窗口关掉后再启动：新开的窗口也不在任务栏', again.found === true && again.toolWindow === true && again.buttons <= base.buttons, again);
+
+  // 退出托盘：小窗口跟着关掉（包括已经收进托盘的），不留下一个连不上服务的空窗口
+  state('minimize');
+  spawnSync(exe, ['--quit'], { env: Object.assign({}, process.env, { USERPROFILE: home, HOME: home }) });
+  let gone = state();
+  for (let i = 0; i < 30 && (gone.found || running()); i++) { await sleep(250); gone = state(); }
+  ok('退出托盘：托盘程序已经退出', !running());
+  ok('退出托盘：小窗口跟着关掉了', gone.found === false, gone);
 } finally {
   closeWindow();
   spawnSync('taskkill', ['/IM', 'prompt-plan-helper.exe', '/F'], { encoding: 'utf8' });

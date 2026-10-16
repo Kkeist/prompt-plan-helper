@@ -24,10 +24,17 @@ static class Program
     public static readonly string Suffix = Environment.GetEnvironmentVariable("PLAN_HELPER_TEST") ?? "";
     static readonly string SingleName = "prompt-plan-helper-single" + Suffix;
     static readonly string OpenEventName = "prompt-plan-helper-open" + Suffix;
+    static readonly string QuitEventName = "prompt-plan-helper-quit" + Suffix;
 
     [STAThread]
     static void Main(string[] args)
     {
+        // --quit：让正在运行的那一个退出（和托盘菜单里的退出一样，会把小窗口一起关掉）
+        if (args.Any(a => a == "--quit"))
+        {
+            try { EventWaitHandle.OpenExisting(QuitEventName).Set(); } catch (Exception) { }
+            return;
+        }
         bool created;
         using (var mutex = new Mutex(true, SingleName, out created))
         {
@@ -40,7 +47,7 @@ static class Program
             }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Host(OpenEventName));
+            Application.Run(new Host(OpenEventName, QuitEventName));
         }
     }
 }
@@ -202,6 +209,18 @@ static class WinApi
         SetWinEventHook(0x8002, 0x8002, IntPtr.Zero, watcher, 0, 0, 0);
     }
 
+    [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+
+    // 退出托盘时把小窗口一起关掉：可见的、被收进托盘的都发关闭消息；页面连的本机服务已经没有了，留着只是一个空窗口
+    public static void CloseAll(string[] titles)
+    {
+        EnumWindows((h, l) =>
+        {
+            if (IsOurs(h, titles)) PostMessage(h, 0x0010, IntPtr.Zero, IntPtr.Zero);
+            return true;
+        }, IntPtr.Zero);
+    }
+
     public static void Raise(IntPtr h)
     {
         if (IsIconic(h)) ShowWindow(h, 9);
@@ -246,12 +265,21 @@ class Host : ApplicationContext
     readonly HotkeyWindow hotkey = new HotkeyWindow();
     readonly Server server = new Server();
     readonly EventWaitHandle openEvent;
+    readonly EventWaitHandle quitEvent;
     readonly Control sync = new Control();
 
-    public Host(string openEventName)
+    public Host(string openEventName, string quitEventName)
     {
         sync.CreateControl();
         openEvent = new EventWaitHandle(false, EventResetMode.AutoReset, openEventName);
+        quitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, quitEventName);
+        var q = new Thread(() =>
+        {
+            quitEvent.WaitOne();
+            try { sync.BeginInvoke(new Action(ExitThread)); } catch (Exception) { }
+        });
+        q.IsBackground = true;
+        q.Start();
         var t = new Thread(() =>
         {
             while (true)
@@ -378,6 +406,8 @@ class Host : ApplicationContext
         tray.Visible = false;
         tray.Dispose();
         hotkey.Dispose();
+        // 自测用的实例（有后缀）不动窗口，避免关掉正在使用的那一个
+        if (Program.Suffix == "") WinApi.CloseAll(Vocab.Titles());
         server.Stop();
         base.ExitThreadCore();
     }
