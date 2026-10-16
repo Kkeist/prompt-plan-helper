@@ -1,6 +1,6 @@
 // 端到端自测：node tests/e2e.mjs
 // 无头 Chrome，交互走调试协议；浏览器文件夹用页面内的内存实现替身；桌面服务用临时的用户目录；截图放进 preview/。
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -78,7 +78,7 @@ writeFileSync(join(tmpHome, '.claude.json'), JSON.stringify({ projects: { [projD
 const srvPort = 14500 + Math.floor(Math.random() * 400);
 const appSrv = spawn(process.execPath, [join(root, 'tools', 'app-server.mjs')], {
   stdio: 'ignore',
-  env: Object.assign({}, process.env, { USERPROFILE: tmpHome, HOME: tmpHome, PORT: String(srvPort) }),
+  env: Object.assign({}, process.env, { USERPROFILE: tmpHome, HOME: tmpHome, PORT: String(srvPort), SHUPIAN_REG_ROOT: 'Software\\ShupianTest' }),
 });
 let srvInfo = null;
 for (let i = 0; i < 40 && !srvInfo; i++) {
@@ -434,6 +434,13 @@ try {
   await HW.wait(async () => HW.exists('.frow'), 40);
   await HW.wait(async () => !(await win.eval('__one(".extrow").classList.contains("wait")')), 40);
   ok('最近页顶上提示悬浮窗要装扩展', (await HW.exists('.extrow .muted', '需要先安装浏览器扩展')) && (await HW.exists('.extrow button', '安装浏览器扩展', true)), await HW.text('.extrow'));
+  await HW.wait(async () => HW.exists('.modal .ext-block'), 40);
+  ok('第一次打开：安装说明自动弹出', await HW.exists('.modal .ext-block'), await HW.text('.modal'));
+  ok('第一次打开：已经自动登记给浏览器，弹窗里说明要点「启用」', /已登记到/.test((await HW.text('.modal .ext-status')) || ''), await HW.text('.modal .ext-status'));
+  ok('弹窗第一块是一键安装，Edge 和 Chrome 各一个按钮', (await HW.exists('.modal h3', '一键安装', true)) && (await HW.exists('.modal .btn.primary', '安装到')), await HW.text('.modal'));
+  await win.key('Escape');
+  await win.sleep(150);
+  ok('关掉之后不再自动弹出，页面顶上仍有安装入口', !(await HW.exists('.modal')) && (await HW.exists('.extrow button', '安装浏览器扩展', true)));
   await win.click(Q('.extrow button', '安装浏览器扩展', true));
   await HW.wait(async () => HW.exists('.modal .steps'), 40);
   const extPath = await HW.text('.modal .fpath');
@@ -451,7 +458,7 @@ try {
   const HI = helpers(inst);
   await inst.goto('http://127.0.0.1:' + srvInfo.port + '/index.html?k=' + srvInfo.token + '&view=install');
   await HI.wait(async () => HI.exists('.bookmarklet'), 40);
-  ok('安装页：书签和浏览器扩展两种方式', (await HI.count('.ext-block')) === 2 && (await HI.exists('h2', '安装悬浮窗', true)), await HI.text('.col'));
+  ok('安装页：一键安装、书签和手动安装', (await HI.count('.ext-block')) === 3 && (await HI.exists('h2', '安装悬浮窗', true)), await HI.text('.col'));
   await inst.shot(join(shots, '05c-安装页-900.png'));
   // 新开的页面会抢走前台，原来的窗口变成后台页：定时器被限速、截图卡住。关掉它，再把桌面窗口放回前台
   await inst.send('Page.close');
@@ -711,6 +718,7 @@ try {
   appSrv.kill();
   await sleep(300);
   try { rmSync(tmpHome, { recursive: true, force: true }); } catch (e) { /* 临时目录下次再清 */ }
+  spawnSync('reg', ['delete', 'HKCU\\Software\\ShupianTest', '/f'], { encoding: 'utf8' });
 }
 console.log('\n通过 ' + pass + ' 项，失败 ' + fails.length + ' 项');
 fails.forEach((f) => console.log('  失败：' + f));

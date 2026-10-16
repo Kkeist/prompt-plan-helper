@@ -48,7 +48,8 @@ try {
   ok('窗口可见', s.visible === true, s);
 
   const min = state('minimize');
-  ok('最小化之后仍然没有任务栏按钮增加', min.iconic === true && min.buttons <= base.buttons, min);
+  ok('最小化 = 收进托盘：窗口隐藏，屏幕上不留小条', min.found === true && min.iconic === true && min.visible === false, min);
+  ok('最小化之后任务栏按钮也没有增加', min.buttons <= base.buttons, min);
   spawn(exe, [], { stdio: 'ignore', env: Object.assign({}, process.env, { USERPROFILE: home, HOME: home }) });
   let back = {};
   for (let i = 0; i < 24 && !(back.visible && back.iconic === false); i++) { await sleep(250); back = state(); }

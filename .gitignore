@@ -2,3 +2,4 @@ preview/
 node_modules/
 tools/.private-words.txt
 .DS_Store
+tools/.extension-key.pem

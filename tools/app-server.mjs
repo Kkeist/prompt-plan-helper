@@ -2,9 +2,9 @@
 // 只监听 127.0.0.1；接口都要带启动时生成的口令；只能读写已知文件夹里的计划书文件；一段时间没有人用就自己退出。
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
-import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path';
@@ -269,6 +269,41 @@ export function syncExtension() {
   return EXT_DIR;
 }
 
+// 扩展的身份：manifest 里的公钥算出的 ID 和版本（打包时写进去）
+export function extensionIdentity() {
+  const m = JSON.parse(readFileSync(join(EXT_SRC, 'manifest.json'), 'utf8'));
+  const h = createHash('sha256').update(Buffer.from(m.key || '', 'base64')).digest().subarray(0, 16);
+  const id = Array.from(h).map((b) => String.fromCharCode(97 + (b >> 4)) + String.fromCharCode(97 + (b & 15))).join('');
+  return { id, version: m.version, hasKey: !!m.key };
+}
+
+// 一键安装：把扩展安装包登记到浏览器的「外部扩展」注册表项（当前用户，不要管理员）。
+// 浏览器运行中几秒内、没运行时下次启动就会发现它，并提示用户启用。测试用 SHUPIAN_REG_ROOT 改到别的注册表位置。
+const REG_VENDOR = { edge: ['Microsoft', 'Edge'], chrome: ['Google', 'Chrome'] };
+const EXT_PACKAGE = join(STATE_DIR, 'prompt-plan-helper-extension.crx');
+const EXT_PACKAGE_SRC = join(projectRoot, 'web', 'download', 'prompt-plan-helper-extension.crx');
+const regKey = (browser, id) => ['HKCU', process.env.SHUPIAN_REG_ROOT || 'Software'].concat(REG_VENDOR[browser], ['Extensions', id]).join(String.fromCharCode(92));
+
+function extensionRegistered(browser) {
+  if (!REG_VENDOR[browser]) return false;
+  const { id, version } = extensionIdentity();
+  const r = spawnSync('reg', ['query', regKey(browser, id), '/v', 'version'], { encoding: 'utf8', windowsHide: true });
+  return r.status === 0 && r.stdout.split('\n').some((l) => l.indexOf('REG_SZ') >= 0 && l.trim().split(' ').filter(Boolean).pop() === version);
+}
+
+// 失败时抛出带 code 的错误：browser（不支持的浏览器）、package（没有安装包）、registry（写注册表失败）
+function registerExtension(browser) {
+  const fail = (code) => Object.assign(new Error(code), { code });
+  if (!REG_VENDOR[browser]) throw fail('browser');
+  const { id, version, hasKey } = extensionIdentity();
+  if (!hasKey || !existsSync(EXT_PACKAGE_SRC)) throw fail('package');
+  mkdirSync(STATE_DIR, { recursive: true });
+  copyFileSync(EXT_PACKAGE_SRC, EXT_PACKAGE);
+  const key = regKey(browser, id);
+  const set = (name, value) => spawnSync('reg', ['add', key, '/v', name, '/t', 'REG_SZ', '/d', value, '/f'], { encoding: 'utf8', windowsHide: true }).status === 0;
+  if (!set('path', EXT_PACKAGE) || !set('version', version)) throw fail('registry');
+}
+
 // 本机装了的浏览器，及各自的扩展页地址
 const BROWSERS = [
   { id: 'edge', name: 'Edge', page: 'edge://extensions/', exe: ['Microsoft/Edge/Application/msedge.exe'] },
@@ -366,13 +401,27 @@ export function startServer() {
         }
         if (url.pathname === '/api/extension') {
           if (req.method === 'GET') {
-            json(200, { path: syncExtension(), seen: extensionSeen, browsers: BROWSERS.map((b) => ({ id: b.id, name: b.name })) });
+            json(200, {
+              path: syncExtension(),
+              seen: extensionSeen,
+              id: extensionIdentity().id,
+              browsers: BROWSERS.map((b) => ({ id: b.id, name: b.name, oneClick: !!REG_VENDOR[b.id], registered: extensionRegistered(b.id) })),
+            });
             return;
           }
           if (req.method === 'POST') {
             const body = await readJsonBody();
             const b = BROWSERS.filter((x) => x.id === body.browser)[0];
             if (!b) { json(404, { error: 'browser' }); return; }
+            if (body.action === 'register') {
+              try {
+                registerExtension(b.id);
+                json(200, { ok: true });
+              } catch (e) {
+                json(e.code === 'package' ? 409 : e.code === 'browser' ? 400 : 500, { error: e.code || 'registry' });
+              }
+              return;
+            }
             // page 为 install 时打开本机服务提供的安装页（书签和扩展两种方式），否则打开浏览器自己的扩展页
             const target = body.page === 'install' ? 'http://127.0.0.1:' + port + '/index.html?k=' + token + '&view=install' : b.page;
             spawn(b.path, [target], { detached: true, stdio: 'ignore' }).unref();

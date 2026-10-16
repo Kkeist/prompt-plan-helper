@@ -47,6 +47,9 @@ files(web).forEach((f) => {
 files(join(root, 'extension')).forEach((f) => {
   args.push('/resource:' + f + ',ext/' + relative(join(root, 'extension'), f).replace(/\\/g, '/'));
 });
+// 扩展安装包：「一键安装」登记给浏览器用
+const crx = join(out, 'prompt-plan-helper-extension.crx');
+if (existsSync(crx)) args.push('/resource:' + crx + ',ext.crx');
 args.push('/resource:' + join(web, 'shupian.ico') + ',shupian.ico');
 args.push(join(root, 'desktop', 'PlanHelper.cs'));
 

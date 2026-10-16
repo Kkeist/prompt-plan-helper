@@ -156,23 +156,50 @@ static class WinApi
         ShowWindow(h, 8);
     }
 
-    // 找已经打开的小窗口：浏览器应用窗口，标题是页面标题
+    // 找已经打开的小窗口：浏览器应用窗口，标题是页面标题。可见的优先；最小化时被收进托盘（隐藏且处于最小化）的也算
     public static IntPtr FindWindow(string[] titles)
     {
-        IntPtr found = IntPtr.Zero;
+        IntPtr visible = IntPtr.Zero;
+        IntPtr hidden = IntPtr.Zero;
         EnumWindows((h, l) =>
         {
-            if (!IsWindowVisible(h)) return true;
-            var cls = new StringBuilder(64);
-            GetClassName(h, cls, 64);
-            if (cls.ToString() != "Chrome_WidgetWin_1") return true;
-            var text = new StringBuilder(256);
-            GetWindowText(h, text, 256);
-            var s = text.ToString();
-            if (titles.Any(t => s == t)) { found = h; return false; }
+            if (!IsOurs(h, titles)) return true;
+            if (IsWindowVisible(h)) { visible = h; return false; }
+            if (IsIconic(h)) hidden = h;
             return true;
         }, IntPtr.Zero);
-        return found;
+        return visible != IntPtr.Zero ? visible : hidden;
+    }
+
+    static bool IsOurs(IntPtr h, string[] titles)
+    {
+        var cls = new StringBuilder(64);
+        GetClassName(h, cls, 64);
+        if (cls.ToString() != "Chrome_WidgetWin_1") return false;
+        var text = new StringBuilder(256);
+        GetWindowText(h, text, 256);
+        var s = text.ToString();
+        return titles.Any(t => s == t);
+    }
+
+    delegate void WinEventProc(IntPtr hook, uint evt, IntPtr hwnd, int idObject, int idChild, uint thread, uint time);
+    [DllImport("user32.dll")] static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr mod, WinEventProc proc, uint pid, uint tid, uint flags);
+    static WinEventProc watcher;
+
+    // 小窗口只留托盘：窗口标题变成我们的标题时去掉任务栏按钮；点最小化时直接隐藏，
+    // 否则工具窗口最小化后会变成屏幕左下角的一个小条。找回靠托盘图标、快捷键或再次启动。必须在有消息循环的线程里调用
+    public static void Watch(string[] titles)
+    {
+        watcher = (hook, evt, hwnd, idObject, idChild, thread, time) =>
+        {
+            if (idObject != 0 || hwnd == IntPtr.Zero || !IsOurs(hwnd, titles)) return;
+            if (evt == 0x0016) ShowWindow(hwnd, 0);
+            else HideFromTaskbar(hwnd);
+        };
+        // 0x0016 最小化开始；0x800C 窗口标题变化；0x8002 窗口显示
+        SetWinEventHook(0x0016, 0x0016, IntPtr.Zero, watcher, 0, 0, 0);
+        SetWinEventHook(0x800C, 0x800C, IntPtr.Zero, watcher, 0, 0, 0);
+        SetWinEventHook(0x8002, 0x8002, IntPtr.Zero, watcher, 0, 0, 0);
     }
 
     public static void Raise(IntPtr h)
@@ -237,6 +264,7 @@ class Host : ApplicationContext
         t.Start();
 
         server.Start();
+        WinApi.Watch(Vocab.Titles());
         hotkey.Pressed += OpenHub;
 
         var menu = new ContextMenuStrip();
@@ -580,6 +608,73 @@ class Server
         return dir;
     }
 
+    const string BS = "\\";
+
+    // 扩展的身份：manifest 里的公钥算出的 ID 和版本（打包时写进去）
+    static string[] ExtensionIdentity()
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        string text;
+        using (var s = asm.GetManifestResourceStream("ext/manifest.json"))
+        using (var r = new StreamReader(s, Encoding.UTF8)) text = r.ReadToEnd();
+        var m = Json.DeserializeObject(text) as Dictionary<string, object>;
+        var key = m != null && m.ContainsKey("key") ? Convert.ToString(m["key"]) : "";
+        var version = m != null && m.ContainsKey("version") ? Convert.ToString(m["version"]) : "";
+        if (key == "") return new[] { "", version };
+        byte[] hash;
+        using (var sha = System.Security.Cryptography.SHA256.Create()) hash = sha.ComputeHash(Convert.FromBase64String(key));
+        var id = new StringBuilder();
+        for (var i = 0; i < 16; i++) { id.Append((char)('a' + (hash[i] >> 4))); id.Append((char)('a' + (hash[i] & 15))); }
+        return new[] { id.ToString(), version };
+    }
+
+    // 一键安装：把扩展安装包登记到浏览器的「外部扩展」注册表项（当前用户，不要管理员）。
+    // 浏览器运行中几秒内、没运行时下次启动就会发现它，并提示用户启用。测试用 SHUPIAN_REG_ROOT 改到别的注册表位置。
+    static string RegistryPath(string browser, string id)
+    {
+        var vendor = browser == "edge" ? "Microsoft" + BS + "Edge" : browser == "chrome" ? "Google" + BS + "Chrome" : "";
+        if (vendor == "") return null;
+        var root = Environment.GetEnvironmentVariable("SHUPIAN_REG_ROOT");
+        return (string.IsNullOrEmpty(root) ? "Software" : root) + BS + vendor + BS + "Extensions" + BS + id;
+    }
+
+    bool ExtensionRegistered(string browser)
+    {
+        var ident = ExtensionIdentity();
+        var path = RegistryPath(browser, ident[0]);
+        if (path == null || ident[0] == "") return false;
+        using (var k = Registry.CurrentUser.OpenSubKey(path))
+            return k != null && Convert.ToString(k.GetValue("version")) == ident[1];
+    }
+
+    // 失败时返回错误代码：browser（不支持的浏览器）、package（没有安装包）、registry（写注册表失败）；成功返回空串
+    string RegisterExtension(string browser)
+    {
+        var ident = ExtensionIdentity();
+        var path = RegistryPath(browser, ident[0]);
+        if (path == null) return "browser";
+        var asm = Assembly.GetExecutingAssembly();
+        byte[] data;
+        using (var s = asm.GetManifestResourceStream("ext.crx"))
+        {
+            if (s == null || ident[0] == "") return "package";
+            using (var ms = new MemoryStream()) { s.CopyTo(ms); data = ms.ToArray(); }
+        }
+        try
+        {
+            var pkg = Path.Combine(home, ".shupian", "prompt-plan-helper-extension.crx");
+            Directory.CreateDirectory(Path.GetDirectoryName(pkg));
+            File.WriteAllBytes(pkg, data);
+            using (var k = Registry.CurrentUser.CreateSubKey(path))
+            {
+                k.SetValue("path", pkg, RegistryValueKind.String);
+                k.SetValue("version", ident[1], RegistryValueKind.String);
+            }
+        }
+        catch (Exception) { return "registry"; }
+        return "";
+    }
+
     public void Start()
     {
         var start = 14165;
@@ -751,7 +846,7 @@ class Server
         {
             if (ctx.Request.HttpMethod == "GET")
             {
-                SendJson(ctx, 200, new { path = SyncExtension(), seen = extensionSeen, browsers =Browsers().Select(b => new { id = b[0], name = b[1] }).ToList() });
+                SendJson(ctx, 200, new { path = SyncExtension(), seen = extensionSeen, id = ExtensionIdentity()[0], browsers = Browsers().Select(b => new { id = b[0], name = b[1], oneClick = b[0] == "edge" || b[0] == "chrome", registered = ExtensionRegistered(b[0]) }).ToList() });
                 return;
             }
             if (ctx.Request.HttpMethod == "POST")
@@ -760,6 +855,13 @@ class Server
                 var id = obj != null && obj.ContainsKey("browser") ? Convert.ToString(obj["browser"]) : "";
                 var b = Browsers().FirstOrDefault(x => x[0] == id);
                 if (b == null) { SendJson(ctx, 404, new { error = "browser" }); return; }
+                if (obj.ContainsKey("action") && Convert.ToString(obj["action"]) == "register")
+                {
+                    var code = RegisterExtension(b[0]);
+                    if (code == "") SendJson(ctx, 200, new { ok = true });
+                    else SendJson(ctx, code == "package" ? 409 : code == "browser" ? 400 : 500, new { error = code });
+                    return;
+                }
                 // page 为 install 时打开本机服务提供的安装页（书签和扩展两种方式），否则打开浏览器自己的扩展页
                 var page = obj != null && obj.ContainsKey("page") ? Convert.ToString(obj["page"]) : "";
                 var target = page == "install" ? "http://127.0.0.1:" + port + "/index.html?k=" + token + "&view=install" : b[3];

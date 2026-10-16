@@ -3,16 +3,55 @@
   "name": "薯片计划助手",
   "version": "1.2.0",
   "description": "在任何网页上打开悬浮窗：选取元素、区域截图、记录当前页面，并复制修改说明。",
-  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
-  "action": { "default_title": "薯片计划助手（Alt+Shift+S）", "default_icon": { "16": "icons/16.png", "32": "icons/32.png" } },
-  "background": { "service_worker": "background.js", "scripts": ["background.js"] },
-  "browser_specific_settings": { "gecko": { "id": "plan-helper@shupian.local", "strict_min_version": "128.0" } },
-  "permissions": ["storage"],
-  "host_permissions": ["<all_urls>"],
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_title": "薯片计划助手（Alt+Shift+S）",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "plan-helper@shupian.local",
+      "strict_min_version": "128.0"
+    }
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "commands": {
-    "_execute_action": { "suggested_key": { "default": "Alt+Shift+S" }, "description": "打开或收起悬浮窗" }
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "打开或收起悬浮窗"
+    }
   },
   "content_scripts": [
-    { "matches": ["<all_urls>"], "js": ["shupian.js"], "run_at": "document_idle" }
-  ]
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "shupian.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjJvQX3SnYsJce4RZJmGa2jDJ8bsJ8gn2jCDBOwSQw8G5nRRkFA2r9r+M/RwafWMlBhw5uNt4GF0EWEvxp0qXq7JsgD3yTuslFtYseNKW/M/vVJ1ZZjTAt+HXLxQROEiztEyLS1E/TOiYIS8aW4LwOQhic7LrJU9TsSuBa+fdqTCfoJXvCarb24eNV49h60QL+F3E1BTym8MpYvpDMWUDEaNxrmtie2nM66WsJLNzrfC8YvpUUJsm4lZDo4xDjuOuIG7cLtsmRyUl7KOiDHhNfIE906IcZ3lEI+qOggUKyKKkr4MDfhd5Wz+V43K8JWe/Yy/6eejo1h4b5Tbd0dCR4wIDAQAB"
 }

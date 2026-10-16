@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { iconSvg } from './build-icons.mjs';
 import { checkKeys } from './i18n-keys.mjs';
 import { T, locales } from './text.mjs';
+import { pack } from './pack-extension.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (...p) => readFileSync(join(root, ...p), 'utf8');
@@ -103,6 +104,13 @@ writeFileSync(join(ext, 'shupian.js'), bundle);
 [['favicon-16.png', '16.png'], ['favicon-32.png', '32.png'], ['favicon-48.png', '48.png'], ['icon-192.png', '128.png']].forEach(([a, b]) => {
   if (existsSync(join(out, a))) copyFileSync(join(out, a), join(ext, 'icons', b));
 });
+
+// 扩展安装包（CRX）：桌面版「一键安装」把它登记给浏览器。签名私钥只在本机，没有私钥时保留已有的安装包
+if (existsSync(join(root, 'tools', '.extension-key.pem'))) {
+  const r = pack();
+  mkdirSync(join(out, 'download'), { recursive: true });
+  writeFileSync(join(out, 'download', 'prompt-plan-helper-extension.crx'), r.crx);
+}
 
 // AI 说明里带一份同步的模板副本
 // AI 说明目录：skill/，以及 skills/ 下带 references 的各个目录

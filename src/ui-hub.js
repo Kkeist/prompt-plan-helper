@@ -64,19 +64,39 @@ function bookmarkletHref() {
     + "document.documentElement.setAttribute('data-shupian-open','');document.documentElement.appendChild(s)})();void 0";
 }
 
-// 安装内容：书签和浏览器扩展两种方式。info 是 /api/extension 的返回
+// 把扩展登记给浏览器（一键安装）：成功返回 true，失败提示原因并返回 false
+function registerExtensionIn(kit, browser) {
+  return Api.call('POST', '/api/extension', { browser: browser.id, action: 'register' }).then(() => true, (e) => {
+    const missing = /409/.test(errText(e));
+    kit.toast(t('could_not_register_the_extension_why', { why: missing ? t('the_extension_package_was_not_found_run_the_build') : errText(e) }));
+    return false;
+  });
+}
+
+// 安装内容：一键安装、书签、手动加载三种方式。info 是 /api/extension 的返回
 function installContent(kit, info) {
   const openPage = (b, page) => Api.call('POST', '/api/extension', { browser: b.id, page }).catch((e) => kit.toast(t('could_not_open_the_extensions_page_why', { why: errText(e) })));
   const steps = [t('extension_step_open'), t('extension_step_load'), t('extension_step_done'), t('extension_step_button')].map((x) => h('li', { text: x }));
   const link = h('a', { class: 'bookmarklet', href: bookmarkletHref(), draggable: 'true', title: t('drag_to_the_bookmarks_bar') }, t('prompt_plan_helper'));
   link.addEventListener('click', (e) => e.preventDefault());
+  const status = h('p', { class: 'hint ext-status' });
+  const oneClick = info.browsers.filter((b) => b.oneClick);
+  const registeredIn = oneClick.filter((b) => b.registered)[0];
+  if (registeredIn) status.textContent = t('registered_in_name_enable_it', { name: registeredIn.name });
+  const register = (b) => registerExtensionIn(kit, b).then((ok) => { if (ok) status.textContent = t('registered_in_name_enable_it', { name: b.name }); });
   return h('div', null,
+    oneClick.length ? h('div', { class: 'ext-block' },
+      h('h3', { text: t('one_click_install_title') }),
+      h('p', { class: 'hint', text: t('one_click_install_hint') }),
+      h('div', { class: 'row' }, oneClick.map((b) => h('button', { type: 'button', class: 'btn primary', onclick: () => register(b) }, t('install_to_name', { name: b.name })))),
+      status) : null,
     h('div', { class: 'ext-block' },
       h('h3', { text: t('bookmark_title') }),
       h('p', { class: 'hint', text: t('bookmark_steps') }),
       link,
       h('p', { class: 'hint', text: t('bookmark_limits') })),
-    h('div', { class: 'ext-block' },
+    h('details', { class: 'ext-block' },
+      h('summary', { text: t('manual_install') }),
       h('h3', { text: t('extension_title') }),
       h('ol', { class: 'steps' }, steps),
       h('div', { class: 'muted', text: t('extension_folder') }),
@@ -85,7 +105,7 @@ function installContent(kit, info) {
       info.browsers.length ? null : h('p', { class: 'hint', text: t('no_edge_or_chrome_was_found') }),
       h('div', { class: 'row' }, info.browsers.map((b) => h('button', { type: 'button', class: 'btn', onclick: () => openPage(b, '') }, t('open_the_extensions_page_in_name', { name: b.name }))))),
     info.browsers.length
-      ? h('div', { class: 'row' }, info.browsers.map((b) => h('button', { type: 'button', class: 'btn primary', onclick: () => openPage(b, 'install') }, t('open_the_install_page_in_name', { name: b.name }))))
+      ? h('div', { class: 'row' }, info.browsers.map((b) => h('button', { type: 'button', class: 'btn', onclick: () => openPage(b, 'install') }, t('open_the_install_page_in_name', { name: b.name }))))
       : null);
 }
 
@@ -110,15 +130,22 @@ function extensionRow(kit) {
   setTimeout(async () => {
     // 扩展在别的浏览器里时，页面里没有标记，但扩展已经联系过本服务
     let seen = false;
-    try { seen = !!(await Api.call('GET', '/api/extension')).seen; } catch (e) { kit.toast(t('could_not_prepare_the_extension_why', { why: errText(e) })); }
+    let info = null;
+    try { info = await Api.call('GET', '/api/extension'); seen = !!info.seen; } catch (e) { kit.toast(t('could_not_prepare_the_extension_why', { why: errText(e) })); }
     row.classList.remove('wait');
     clear(row);
     if (extensionInstalled() || seen) {
       row.append(h('span', { class: 'muted', text: t('the_page_floating_window_is_on_alt_shift_s') }));
       return;
     }
-    row.append(h('span', { class: 'muted', text: t('the_page_floating_window_needs_the_browser_extension') }),
+    const waiting = info && info.browsers.some((b) => b.registered);
+    row.append(h('span', { class: 'muted', text: waiting ? t('the_extension_is_registered_enable_it_in_the_browser') : t('the_page_floating_window_needs_the_browser_extension') }),
       h('button', { type: 'button', class: 'btn sm primary', onclick: () => openExtensionHelp(kit) }, t('install_the_browser_extension')));
+    // 第一次打开、扩展还没装也没登记：自动登记给本机的 Edge、Chrome，再弹出说明（浏览器会提示启用），只做一次
+    if (!waiting && !LS.get('shupian:ext-asked', false)) {
+      LS.set('shupian:ext-asked', true);
+      Promise.all(info.browsers.filter((b) => b.oneClick).map((b) => registerExtensionIn(kit, b))).then(() => openExtensionHelp(kit));
+    }
   }, 1200);
   row.append(h('span', { class: 'muted', text: t('the_page_floating_window_is_on_alt_shift_s') }));
   return row;

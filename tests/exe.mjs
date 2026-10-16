@@ -26,7 +26,9 @@ writeFileSync(join(home, '.claude', 'projects', enc, 'a.jsonl'), '{}\n');
 utimesSync(join(home, '.claude', 'projects', enc, 'a.jsonl'), new Date(), new Date());
 writeFileSync(join(home, '.claude.json'), JSON.stringify({ projects: { [proj]: {} } }));
 
-const env = Object.assign({}, process.env, { USERPROFILE: home, HOME: home, PLAN_HELPER_TEST: '-test' });
+// 一键安装写的注册表位置改到测试专用的键，不碰真实浏览器的外部扩展项
+const REG_ROOT = 'Software\\ShupianTest';
+const env = Object.assign({}, process.env, { USERPROFILE: home, HOME: home, PLAN_HELPER_TEST: '-test', SHUPIAN_REG_ROOT: REG_ROOT });
 const exeProc = spawn(exe, [], { env: Object.assign({}, env, { PORT: '14611' }), stdio: 'ignore' });
 const stateFile = join(home, '.shupian', 'server.json');
 let exeInfo = null;
@@ -114,6 +116,22 @@ try {
     ok(label + '：本机网页的预检请求通过，别的网站不给允许来源', localOk.status === 204 && localOk.allow === 'http://localhost:3000' && otherNo.status === 204 && otherNo.allow === '', [localOk, otherNo]);
     ok(label + '：扩展接口的安装页参数：不认识的浏览器被拒绝', (await post('/api/extension', { browser: 'nothing', page: 'install' })).status === 404);
     ok(label + '：扩展接口列出浏览器，不认识的浏览器被拒绝', Array.isArray(ext.json.browsers) && (await post('/api/extension', { browser: 'nothing' })).status === 404, ext.text.slice(0, 160));
+    // 一键安装：把扩展安装包登记到浏览器的外部扩展注册表项（这里写在测试专用的键下）
+    // 两个服务共用同一个测试注册表键：先清掉，再看登记前的状态
+    spawnSync('reg', ['delete', 'HKCU\\' + REG_ROOT, '/f'], { encoding: 'utf8' });
+    const fresh = await call(info, '/api/extension');
+    const oneClick = fresh.json.browsers.filter((x) => x.id === 'edge' || x.id === 'chrome')[0];
+    if (oneClick) {
+      ok(label + '：扩展 ID 来自 manifest 里的公钥', /^[a-p]{32}$/.test(ext.json.id), ext.json.id);
+      ok(label + '：登记之前没有标出已登记', oneClick.oneClick === true && oneClick.registered === false, oneClick);
+      const reg = await post('/api/extension', { browser: oneClick.id, action: 'register' });
+      const pkg = join(home, '.shupian', 'prompt-plan-helper-extension.crx');
+      ok(label + '：一键安装：安装包放到固定位置，文件是 CRX3', reg.status === 200 && existsSync(pkg) && readFileSync(pkg).subarray(0, 4).toString() === 'Cr24', [reg.status, reg.text.slice(0, 80)]);
+      const after = await call(info, '/api/extension');
+      ok(label + '：登记之后扩展接口标出已登记', after.json.browsers.filter((x) => x.id === oneClick.id)[0].registered === true, after.text.slice(0, 200));
+    }
+    const ff = ext.json.browsers.filter((x) => x.id === 'firefox')[0];
+    if (ff) ok(label + '：火狐不支持一键安装', ff.oneClick === false && (await post('/api/extension', { browser: 'firefox', action: 'register' })).status === 400);
     const r = await post('/api/mkdir', { parent: proj, name: made });
     ok(label + '：新建文件夹', r.status === 200 && existsSync(join(proj, made)) && r.json.name === made, r.text.slice(0, 120));
     ok(label + '：同名文件夹被拒绝', (await post('/api/mkdir', { parent: proj, name: made })).status === 409);
@@ -222,6 +240,7 @@ try {
   exeProc.kill();
   await sleep(500);
   try { rmSync(home, { recursive: true, force: true }); } catch (e) { /* 下次再清 */ }
+  spawnSync('reg', ['delete', 'HKCU\\' + REG_ROOT, '/f'], { encoding: 'utf8' });
 }
 console.log('\n通过 ' + pass + ' 项，失败 ' + fails.length + ' 项');
 process.exit(fails.length ? 1 : 0);
