@@ -41,22 +41,32 @@
 .win {
   position: fixed;
   z-index: 2147483000;
-  width: 19em;
+  display: flex;
+  flex-direction: column;
+  width: 21em;
   max-width: calc(100vw - 1em);
   max-height: calc(100vh - 1em);
-  overflow-y: auto;
   font-size: 15px;
   background: var(--paper);
   border: 2px solid var(--ink);
   border-radius: 0.7em;
   overflow: hidden;
 }
-.win .app { font-size: inherit; height: auto; }
-.fb-body { padding: 0.5em 0.8em 0.7em; }
-.fb-body .row { margin-top: 0.4em; }
-.collapse { display: inline-flex; align-items: center; cursor: grab; touch-action: none; }
-.collapse .logo { width: 1.7em; height: 1.7em; margin: 0; }
-.fb-body textarea.in { margin-top: 0.5em; }
+.win .app { font-size: inherit; height: auto; flex: 1 1 auto; min-height: 0; }
+.fb-head { display: flex; align-items: center; flex: none; padding: 0.45em 0.6em 0.45em 0.8em; background: var(--soft); border-bottom: 1px solid var(--line); cursor: grab; touch-action: none; }
+.fb-head .logo { width: 1.7em; height: 1.7em; margin: 0 0.5em 0 0; }
+.fb-title { flex: 1; font-weight: 700; }
+.fb-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.fb-foot { flex: none; padding: 0.6em 0.8em 0.1em; background: var(--soft); border-top: 1px solid var(--line); }
+.fb-sec { padding: 0.6em 0.8em 0.3em; border-top: 1px solid var(--line); }
+.fb-sec:first-child { border-top: 0; }
+.fb-sec-title { margin-bottom: 0.4em; font-weight: 700; }
+.fb-sec .row { margin-top: 0.3em; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.4em; margin-bottom: 0.5em; }
+.actions .btn { flex: 1 1 auto; min-height: 2.2em; text-align: center; }
+.actions.three { display: grid; grid-template-columns: repeat(3, 1fr); }
+.actions.three .btn { padding-left: 0.2em; padding-right: 0.2em; }
+.fb-body textarea.in { margin-top: 0; }
 .chipline img.shot { width: 3.2em; height: 2.2em; object-fit: cover; border-radius: 0.3em; margin-right: 0.5em; flex: none; }
 @media (max-width: 400px) { .win { font-size: 14px; } }
 @media (max-width: 320px) { .win { font-size: 12.5px; } }
@@ -290,6 +300,7 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .ftag .x { width: 1.6em; height: 1.6em; }
 .irow-top:empty { display: none; }
 .irow-top .sp { flex: 1; }
+.irow-top:not(:has(button)) { display: none; }
 .add-row { margin-bottom: 0.3em; }
 .optrows { margin-bottom: 0.5em; }
 .optrow { display: flex; flex-wrap: wrap; align-items: center; margin-bottom: 0.3em; }
@@ -326,11 +337,10 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .ref.on { background: var(--ink); color: var(--paper); border-radius: 0.3em; padding: 0 0.35em; text-decoration: none; }
 
 /* 本页部件和可调参数 */
-.parts { margin-top: 0.4em; }
 .part-list { display: flex; flex-wrap: wrap; margin-top: 0.3em; }
 .part-list .ftag { margin: 0 0.35em 0.35em 0; }
 .part-name { flex: 1; min-width: 0; }
-.tune { margin: 0.5em 0 0.6em; }
+.tune-row:last-child { margin-bottom: 0.3em; }
 .tune-row { display: flex; align-items: center; margin-top: 0.3em; }
 .tune-label { flex: none; max-width: 30%; margin-right: 0.5em; overflow-wrap: anywhere; }
 .tune-range { flex: 1; min-width: 0; margin: 0 0.5em 0 0; -webkit-appearance: none; appearance: none; height: 1.2em; background: transparent; }

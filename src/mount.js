@@ -173,22 +173,16 @@ function mountFloat(autoOpen) {
   const toggle = () => (isOpen ? close() : open());
 
   dragWith(fab, null, fabPos, placeFab, toggle);
-  // 窗口里除了按钮和输入框，哪里都能按住拖动；工具那一排的图标点一下收起
-  let downOnCollapse = false;
+  // 窗口里除了按钮和输入框，哪里都能按住拖动
   dragWith(win, (e) => {
     const path = e.composedPath ? e.composedPath() : [];
-    downOnCollapse = false;
     for (let i = 0; i < path.length; i++) {
       const n = path[i];
       if (n === win) break;
-      if (n.classList && n.classList.contains('collapse')) { downOnCollapse = true; return true; }
       if (n.tagName === 'BUTTON' || n.tagName === 'INPUT' || n.tagName === 'TEXTAREA' || n.tagName === 'IMG') return false;
     }
     return true;
-  }, winPos, dragWin, () => {
-    // 按下的是工具那一排的图标，没有拖动：收起成悬浮图标（指针被窗口捕获，所以按下时记下）
-    if (downOnCollapse) close();
-  });
+  }, winPos, dragWin);
 
   document.addEventListener('keydown', (e) => {
     if (e.altKey && e.shiftKey && e.code === 'KeyS') { e.preventDefault(); toggle(); }

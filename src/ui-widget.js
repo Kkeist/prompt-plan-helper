@@ -6,7 +6,7 @@ function createFeedback(opts) {
   const tools = opts.tools;
   const app = h('div', { class: 'app fb' });
   const body = h('div', { class: 'fb-body' });
-  app.append(body);
+  const foot = h('div', { class: 'fb-foot' });
   const kit = createKit(app);
   // 当前页面的信息和截图，整批问题共用
   const S = { info: null, shot: null, naming: null };
@@ -70,10 +70,7 @@ function createFeedback(opts) {
       clearTimeout(draftTimer);
       draftTimer = setTimeout(() => queueDraft(list.snapshot()), 500);
     },
-    // 每一条可以带多个元素：行上的按钮再选一个，下面一个元素一行，可以单独去掉
-    rowTools(row) {
-      return [h('button', { type: 'button', class: 'btn sm', onclick: () => pickInto(row) }, t('pick_an_element'))];
-    },
+    // 每一条可以带多个元素：下面一个元素一行，可以单独去掉
     rowExtra(row, repaint) {
       const els = row.data.elements || [];
       if (!els.length) return null;
@@ -86,8 +83,11 @@ function createFeedback(opts) {
   const logo = document.createElement('span');
   logo.className = 'logo';
   logo.innerHTML = ICON_SVG;
-  // 没有顶栏：图标是工具那一排的第一个按钮，点一下收起；按住窗口里的空白处或图标拖动（在 mount 里处理）
-  const collapse = h('span', { class: 'collapse', title: t('collapse'), 'aria-label': t('collapse') }, logo);
+  // 标题栏：按住拖动窗口（在 mount 里处理），右边的按钮收起成悬浮图标
+  const head = h('div', { class: 'fb-head' }, logo, h('span', { class: 'fb-title', text: t('page_feedback') }),
+    h('button', { type: 'button', class: 'btn sm collapse', onclick() { if (opts.onClose) opts.onClose(); } }, t('collapse')));
+  app.append(head, body, foot);
+  const section = (title, hint) => h('div', { class: 'fb-sec' }, h('div', { class: 'fb-sec-title', text: title }), hint ? h('p', { class: 'hint', text: hint }) : null);
 
   function infoLines() {
     if (!S.info) return [];
@@ -180,10 +180,9 @@ function createFeedback(opts) {
 
   function partsBlock() {
     if (link.state === 'ready') return null;
-    const box = h('div', { class: 'parts' });
-    box.append(h('div', { class: 'row tight' },
-      h('span', { class: 'muted', text: t('parts') }),
-      h('button', { type: 'button', class: 'btn sm', onclick: circlePart }, t('circle_a_part'))));
+    const box = section(t('parts'), Parts.list().length ? t('click_a_part_to_aim_the_note_at_it') : '');
+    box.classList.add('parts');
+    box.append(h('div', { class: 'row tight' }, h('button', { type: 'button', class: 'btn', onclick: circlePart }, t('circle_a_part'))));
     if (S.naming) {
       const input = h('input', { class: 'in part-name', placeholder: t('part_name'), 'aria-label': t('part_name'), value: S.naming.name });
       input.addEventListener('keydown', (e) => {
@@ -207,7 +206,8 @@ function createFeedback(opts) {
   function tuneBlock() {
     const items = Tune.list();
     if (!items.length) return null;
-    const box = h('div', { class: 'tune' }, h('div', { class: 'muted', text: t('tune_title') }));
+    const box = section(t('tune_title'));
+    box.classList.add('tune');
     items.forEach((x) => {
       const name = x.label || x.key;
       const step = x.step || (x.max - x.min) / 100;
@@ -358,37 +358,44 @@ function createFeedback(opts) {
 
   function render() {
     clear(body);
-    body.append(h('div', { class: 'row tight' },
-      collapse,
+    clear(foot);
+    const ready = link.state === 'ready';
+    const where = section(t('point_it_out'));
+    where.append(h('div', { class: 'actions three' },
+      h('button', { type: 'button', class: 'btn', onclick: () => pickInto(list.focusedRow()) }, t('pick_an_element')),
       h('button', { type: 'button', class: 'btn', onclick: region }, t('region_screenshot')),
       h('button', { type: 'button', class: 'btn', onclick: currentPage }, t('current_page'))));
     if (S.info) {
-      body.append(h('div', { class: 'chipline' }, h('span', { text: t('current_page_title', { title: S.info.title || tools.context().page }) }),
+      where.append(h('div', { class: 'chipline' }, h('span', { text: t('current_page_title', { title: S.info.title || tools.context().page }) }),
         h('button', { type: 'button', class: 'x', title: t('clear'), onclick() { S.info = null; render(); } }, '✕')));
     }
     if (S.shot) {
-      body.append(h('div', { class: 'chipline' },
+      where.append(h('div', { class: 'chipline' },
         h('img', { class: 'shot', src: S.shot.url, alt: t('screenshot') }),
         h('span', { text: S.shot.kind === 'simulated' ? t('kind_fake_shot') : t('kind_shot') }),
         h('button', { type: 'button', class: 'x', title: t('clear'), onclick() { setShot(null); render(); } }, '✕')));
     }
-    const ready = link.state === 'ready';
+    body.append(where);
     if (ready) {
+      const plan = section(t('plan'));
       if (link.projects.length > 1) {
-        const plan = h('button', { type: 'button', class: 'link plan-pick', title: t('change_the_plan') }, planName(link.project) + ' ▾');
-        plan.addEventListener('click', () => choosePlan(plan));
-        body.append(plan);
+        const pick = h('button', { type: 'button', class: 'link plan-pick', title: t('change_the_plan') }, planName(link.project) + ' ▾');
+        pick.addEventListener('click', () => choosePlan(pick));
+        plan.append(pick);
       } else {
-        body.append(h('div', { class: 'muted', text: planName(link.project) }));
+        plan.append(h('div', { class: 'hint', text: planName(link.project) }));
       }
+      body.append(plan);
     } else if (link.state !== 'loading' && Link.available) {
       const why = link.state === 'empty' ? (link.project ? t('this_plan_has_no_features_yet') : t('no_folder_with_a_plan_was_found'))
         : link.why === 'unpaired' ? t('open_the_desktop_window_first_to_add_issues') : t('the_desktop_window_did_not_respond_only');
-      body.append(h('p', { class: 'hint', text: why }));
+      body.append(h('div', { class: 'fb-sec' }, h('p', { class: 'hint', text: why })));
     }
-    body.append(partsBlock(), tuneBlock());
-    body.append(list.el);
-    body.append(h('div', { class: 'row' },
+    [partsBlock(), tuneBlock()].forEach((x) => { if (x) body.append(x); });
+    const write = section(t('write_a_note'));
+    write.append(list.el);
+    body.append(write);
+    foot.append(h('div', { class: 'actions' },
       ready ? h('button', { type: 'button', class: 'btn primary', onclick: record }, t('add_to_plan')) : null,
       h('button', { type: 'button', class: ready ? 'btn' : 'btn primary', onclick() { copyThen(kit, feedbackText()); } }, t('copy_text')),
       S.shot ? h('button', { type: 'button', class: 'btn', onclick: copyShot }, t('copy_screenshot')) : null));

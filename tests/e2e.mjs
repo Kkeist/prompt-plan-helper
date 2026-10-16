@@ -661,10 +661,10 @@ try {
   await fpage.sleep(300);
   ok('Alt+Shift+S 打开小窗', (await fpage.eval('__one(".win").style.display')) !== 'none');
   const win1 = await fpage.rectOf(fq('.win'));
-  ok('悬浮窗是小窗：宽不超过 330、高不超过 330', win1.w <= 330 && win1.h <= 330, win1);
-  ok('顶上两个动作按钮，选取元素只在每条问题上', (await HP.count('button', '选取元素')) === 1 && (await HP.exists('button', '区域截图', true)) && (await HP.exists('button', '当前页面', true)));
+  ok('悬浮窗是小窗：宽不超过 330、高不超过 400', win1.w <= 330 && win1.h <= 400, win1);
+  ok('点出位置一块里有选取元素、区域截图、当前页面三个按钮', (await HP.count('button', '选取元素')) === 1 && (await HP.exists('button', '区域截图', true)) && (await HP.exists('button', '当前页面', true)));
   await fpage.shot(join(shots, '07-悬浮窗-1280.png'));
-  const hdr = await fpage.rectOf(fq('.collapse'));
+  const hdr = await fpage.rectOf(fq('.fb-title'));
   await fpage.drag(hdr.x, hdr.y, hdr.x - 300, hdr.y + 100);
   const win2 = await fpage.rectOf(fq('.win'));
   ok('窗口可以拖动', Math.abs(win2.l - win1.l) > 200, [win1.l, win2.l]);
