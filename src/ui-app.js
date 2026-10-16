@@ -1079,6 +1079,17 @@ function createApp(opts) {
           // 一条问题 @ 了几个功能，就记到每个功能下面
           const flat = [];
           items.forEach((x) => x.fs.forEach((f) => flat.push({ featureLine: f.featureLine, text: x.text })));
+          // 计划书已确认、还没有功能清单：第一条问题就是开始做，问题记在新生成的功能清单里
+          if (S.doc === 'plan' && Core.getStatus(S.md) === 'approved') {
+            const before = Core.progressList(S.md);
+            startWork();
+            const after = Core.progressList(S.md);
+            flat.forEach((x) => {
+              const f = before.filter((b) => b.line === x.featureLine)[0];
+              const hit = f && after.filter((a) => a.no === f.no && a.name === f.name)[0];
+              if (hit) x.featureLine = hit.line;
+            });
+          }
           const r = Core.addIssues(S.md, flat, Core.today());
           if (!r.ok) { toast(t('write_the_issue_first')); return; }
           close();
@@ -1171,7 +1182,7 @@ function createApp(opts) {
       h('h2', { text: building ? t('feature_list') : t('project_status') }),
       h('span', { class: 'muted', text: t('done_of_total_done_doing_in_progress', { done, total: list.length, doing }) + (open ? '　' + t('n_open_issues', { n: open }) : '') }),
       building ? h('button', { type: 'button', class: 'btn sm', onclick: openAddFeature }, '＋ ' + t('add_a_feature')) : null,
-      building ? h('button', { type: 'button', class: 'btn sm', onclick: () => openIssue(list[0].line) }, '＋ ' + t('report_an_issue')) : null));
+      h('button', { type: 'button', class: 'btn sm', onclick: () => openIssue(list[0].line) }, '＋ ' + t('report_an_issue'))));
     box.append(h('div', { class: 'bar-track' },
       h('span', { class: 'bar-done', style: 'width:' + (done / list.length) * 100 + '%' }),
       h('span', { class: 'bar-doing', style: 'width:' + (doing / list.length) * 100 + '%' })));
@@ -1195,7 +1206,7 @@ function createApp(opts) {
         h('div', { class: 'status-name' },
           h('button', { type: 'button', class: 'ref', onclick() { jumpTo('[data-no="' + f.no + '"]'); } }, (f.no ? f.no + ' ' : '') + f.name),
           f.what ? h('span', { class: 'muted', text: f.what }) : null),
-        building ? h('button', { type: 'button', class: 'btn sm', title: t('report_an_issue'), 'aria-label': t('report_an_issue'), onclick: () => openIssue(f.line) }, '＋') : null,
+        h('button', { type: 'button', class: 'btn sm', title: t('report_an_issue'), 'aria-label': t('report_an_issue'), onclick: () => openIssue(f.line) }, '＋'),
         chip));
       // 每条问题：点状态在 待处理 / 处理中 / 已修 之间切换；点文字可以改；AI 处理时这里实时变化
       mine.forEach((it) => {
@@ -1637,14 +1648,15 @@ function createApp(opts) {
       kit,
       current: S.project && S.project.path ? S.project.path : '',
       onPick: (path) => connectFolderPath(path),
-      onBrowse: async () => {
+    });
+    const actions = h('div', { class: 'row hub-actions' },
+      h('button', { type: 'button', class: 'btn primary', onclick: newPlanHere }, t('new_plan')),
+      h('button', { type: 'button', class: 'btn', onclick: () => newFolderFlow(connectFolderPath) }, t('new_folder')),
+      h('button', { type: 'button', class: 'btn', async onclick() {
         const path = await pickFolderPath();
         if (path) connectFolderPath(path);
-      },
-      onNewPlan: newPlanHere,
-      onNewFolder: () => newFolderFlow(connectFolderPath),
-    });
-    return h('div', { class: 'col' }, SERVER ? extensionRow(kit) : null, list);
+      } }, t('choose_another_folder')));
+    return h('div', { class: 'col' }, actions, SERVER ? extensionRow(kit) : null, list);
   }
 
   function renderBody() {

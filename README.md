@@ -8,7 +8,7 @@ Write the plan for a new project in plain words, and an AI builds from it. Once 
 
 1. **Web page.** Open `web/index.html`. Start a blank plan or view the example, click each block and write. Export the plan as a Markdown file, or import one to change it.
 2. **Windows desktop window.** Run `start.bat` (or `web/download/prompt-plan-helper.exe`) and press Ctrl+Alt+S. A small window lists your recent project folders; open a plan to see its features and write problems under them.
-3. **Floating window on the page you are building.** In the desktop window choose "Install the browser extension" and follow the four steps, then open your test page (`index.html` or `localhost`). A button appears at the bottom right; Alt+Shift+S opens it. Pick an element, select a region or record the current page, write what is wrong and add it to the plan.
+3. **Floating window on the page you are building.** In the desktop window choose "Install the browser extension", press "Install to Edge" or "Install to Chrome" and turn the extension on in the extensions page that opens (Firefox: drag the bookmark from the same dialog to the bookmarks bar and click it on your page). Then open your test page (`index.html` or `localhost`). A button appears at the bottom right; Alt+Shift+S opens it. Pick an element, select a region or record the current page, write what is wrong and add it to the plan.
 4. **AI.** Put the `skill/` folder into the AI's skills folder. The AI writes the plan from your words, asks for what is missing, builds feature by feature and keeps the progress up to date.
 
 The interface follows the browser language and has a language menu. The words copied for the AI are English by default and can be switched to Chinese.

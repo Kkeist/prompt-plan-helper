@@ -31,7 +31,7 @@
   overflow: hidden;
 }
 .app textarea, .app input { -webkit-user-select: text; user-select: text; }
-.app button { font: inherit; color: inherit; }
+:where(.app) button { font: inherit; color: inherit; }
 .app :focus { outline: none; }
 .app :focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 @media (max-width: 400px) { .app { font-size: 14.5px; } }

@@ -1,7 +1,7 @@
 'use strict';
 // 「最近」标签里的文件夹列表（本机服务提供）：最近在用的文件夹，一键打开计划书、复制地址。
 
-// o: { kit, current, onPick(path), onBrowse(), onNewPlan(), onNewFolder() }
+// o: { kit, current, onPick(path) }
 function folderRows(container, o) {
   clear(container);
   container.append(h('p', { class: 'muted', text: t('reading_recent_folders') }));
@@ -42,10 +42,6 @@ function folderRows(container, o) {
     section(t('recent_folders'), recent);
     section(t('connected_folders'), data.history);
     if (!data.claude.length && !data.history.length) container.append(h('p', { class: 'muted', text: t('no_recent_folders_were_found_use_the_button') }));
-    container.append(h('div', { class: 'row' },
-      h('button', { type: 'button', class: 'btn primary', onclick: o.onNewPlan }, t('new_plan')),
-      h('button', { type: 'button', class: 'btn', onclick: o.onNewFolder }, t('new_folder')),
-      h('button', { type: 'button', class: 'btn', onclick: o.onBrowse }, t('choose_another_folder'))));
   }, (e) => {
     clear(container);
     container.append(h('p', { class: 'err', text: t('could_not_read_the_folder_list_why', { why: errText(e) }) }));
@@ -79,11 +75,17 @@ function installContent(kit, info) {
   const steps = [t('extension_step_open'), t('extension_step_load'), t('extension_step_done'), t('extension_step_button')].map((x) => h('li', { text: x }));
   const link = h('a', { class: 'bookmarklet', href: bookmarkletHref(), draggable: 'true', title: t('drag_to_the_bookmarks_bar') }, t('prompt_plan_helper'));
   link.addEventListener('click', (e) => e.preventDefault());
-  const status = h('p', { class: 'hint ext-status' });
+  const status = h('div', { class: 'ext-status' });
+  const showRegistered = (b) => {
+    clear(status);
+    status.append(
+      h('p', { class: 'hint', text: t('registered_in_name_enable_it', { name: b.name, app: t('prompt_plan_helper') }) }),
+      h('button', { type: 'button', class: 'btn primary', onclick: () => openPage(b, '') }, t('open_the_extensions_page_in_name', { name: b.name })));
+  };
   const oneClick = info.browsers.filter((b) => b.oneClick);
   const registeredIn = oneClick.filter((b) => b.registered)[0];
-  if (registeredIn) status.textContent = t('registered_in_name_enable_it', { name: registeredIn.name });
-  const register = (b) => registerExtensionIn(kit, b).then((ok) => { if (ok) status.textContent = t('registered_in_name_enable_it', { name: b.name }); });
+  if (registeredIn) showRegistered(registeredIn);
+  const register = (b) => registerExtensionIn(kit, b).then((ok) => { if (ok) showRegistered(b); });
   return h('div', null,
     oneClick.length ? h('div', { class: 'ext-block' },
       h('h3', { text: t('one_click_install_title') }),
@@ -94,7 +96,8 @@ function installContent(kit, info) {
       h('h3', { text: t('bookmark_title') }),
       h('p', { class: 'hint', text: t('bookmark_steps') }),
       link,
-      h('p', { class: 'hint', text: t('bookmark_limits') })),
+      h('p', { class: 'hint', text: t('bookmark_limits') }),
+      info.browsers.length ? h('div', { class: 'row' }, info.browsers.map((b) => h('button', { type: 'button', class: 'btn', onclick: () => openPage(b, 'install') }, t('open_the_install_page_in_name', { name: b.name })))) : null),
     h('details', { class: 'ext-block' },
       h('summary', { text: t('manual_install') }),
       h('h3', { text: t('extension_title') }),
@@ -104,9 +107,7 @@ function installContent(kit, info) {
       info.browsers.some((b) => b.id === 'firefox') ? h('p', { class: 'hint', text: t('extension_step_firefox') }) : null,
       info.browsers.length ? null : h('p', { class: 'hint', text: t('no_edge_or_chrome_was_found') }),
       h('div', { class: 'row' }, info.browsers.map((b) => h('button', { type: 'button', class: 'btn', onclick: () => openPage(b, '') }, t('open_the_extensions_page_in_name', { name: b.name }))))),
-    info.browsers.length
-      ? h('div', { class: 'row' }, info.browsers.map((b) => h('button', { type: 'button', class: 'btn', onclick: () => openPage(b, 'install') }, t('open_the_install_page_in_name', { name: b.name }))))
-      : null);
+    null);
 }
 
 async function openExtensionHelp(kit) {
@@ -138,9 +139,15 @@ function extensionRow(kit) {
       row.append(h('span', { class: 'muted', text: t('the_page_floating_window_is_on_alt_shift_s') }));
       return;
     }
-    const waiting = info && info.browsers.some((b) => b.registered);
-    row.append(h('span', { class: 'muted', text: waiting ? t('the_extension_is_registered_enable_it_in_the_browser') : t('the_page_floating_window_needs_the_browser_extension') }),
-      h('button', { type: 'button', class: 'btn sm primary', onclick: () => openExtensionHelp(kit) }, t('install_the_browser_extension')));
+    const added = info && info.browsers.filter((b) => b.registered)[0];
+    const waiting = !!added;
+    if (added) {
+      row.append(h('span', { class: 'muted', text: t('the_extension_is_registered_enable_it_in_the_browser') }),
+        h('button', { type: 'button', class: 'btn sm primary', onclick: () => Api.call('POST', '/api/extension', { browser: added.id, page: '' }).catch((e) => kit.toast(t('could_not_open_the_extensions_page_why', { why: errText(e) }))) }, t('open_the_extensions_page_in_name', { name: added.name })));
+    } else {
+      row.append(h('span', { class: 'muted', text: t('the_page_floating_window_needs_the_browser_extension') }),
+        h('button', { type: 'button', class: 'btn sm primary', onclick: () => openExtensionHelp(kit) }, t('install_the_browser_extension')));
+    }
     // 第一次打开、扩展还没装也没登记：自动登记给本机的 Edge、Chrome，再弹出说明（浏览器会提示启用），只做一次
     if (!waiting && !LS.get('shupian:ext-asked', false)) {
       LS.set('shupian:ext-asked', true);

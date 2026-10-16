@@ -535,7 +535,7 @@ export function startServer() {
     writeFileSync(STATE_FILE, JSON.stringify({ port, token, pid: process.pid }));
     // 调试：在控制台打印地址和每个请求；SHUPIAN_OPEN 时用默认浏览器打开
     if (process.env.SHUPIAN_DEBUG) {
-      const url = 'http://127.0.0.1:' + port + '/index.html?k=' + token;
+      const url = 'http://127.0.0.1:' + port + '/index.html?k=' + token + '&view=hub';
       console.log('debug server: ' + url);
       if (process.env.SHUPIAN_OPEN) spawn('cmd', ['/c', 'start', '""', url], { stdio: 'ignore', windowsHide: true });
     }

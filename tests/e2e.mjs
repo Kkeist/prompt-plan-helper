@@ -132,6 +132,19 @@ try {
   ok('没有虚线', !(await page.eval('(function(){var bad=0;__deep("*").forEach(function(e){var cs=getComputedStyle(e);if(/dashed|dotted/.test(cs.borderTopStyle+cs.borderBottomStyle+cs.borderLeftStyle+cs.borderRightStyle+cs.textDecorationStyle))bad++});return bad})()')));
   await page.shot(join(shots, '02-项目情况-1280.png'));
 
+  console.log('计划书还在整理中：也能写问题');
+  ok('项目情况里有「写问题」入口', await H.exists('.status-head .btn.sm', '＋ 写问题', true));
+  await page.click(Q('.status-head .btn.sm', '＋ 写问题', true));
+  ok('弹出写问题的小窗', await H.exists('.modal.small'));
+  await page.click(Q('.modal.small textarea'));
+  await page.insert('整理中写下的问题');
+  await page.click(Q('.modal-foot button', '添加', true));
+  await page.sleep(300);
+  ok('问题记在功能下面', await H.exists('.issue .issue-text', '整理中写下的问题'));
+  await page.click(Q('.issue .x'));
+  await page.sleep(200);
+  ok('可以删除这条问题', !(await H.exists('.issue .issue-text', '整理中写下的问题')));
+
   console.log('导出（下载）：文件名带日期时间，内容是计划书，可以再导入');
   await page.eval('(function(){window.__dl=[];var c=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download){var a=this;fetch(a.href).then(function(r){return r.text()}).then(function(x){window.__dl.push({name:a.download,text:x})})}else c.call(this)}})()');
   await page.click(btn('⋯'));
@@ -196,6 +209,19 @@ try {
   ok('第一次改进度：生成功能清单，页面切到功能清单', (await H.exists('.doctabs .chip.on', '功能清单', true)) && /进行中 1/.test((await H.text('.status-head .muted')) || ''), await H.text('.status-head .muted'));
   const started = await storeOf();
   ok('功能清单存下来了，计划书的内容没有变', started.length === 1 && started[0].fmd > 0, started);
+  await closeNewTab();
+
+  console.log('已确认、还没开始做：第一条问题就是开始做，问题记在功能清单里');
+  await openNewTab(approved.replace(/进度[：:][^\r\n]*/g, '进度：未做'));
+  ok('项目情况里一直有「写问题」入口', await H.exists('.status-head .btn.sm', '＋ 写问题', true));
+  await page.click(Q('.status-row .btn.sm', '＋'));
+  await page.click(Q('.modal.small textarea'));
+  await page.insert('一开始就发现的问题');
+  await page.click(Q('.modal-foot button', '添加', true));
+  await page.sleep(400);
+  ok('第一条问题：生成功能清单并切过去，问题出现在功能下', (await H.exists('.doctabs .chip.on', '功能清单', true)) && (await H.exists('.issue .issue-text', '一开始就发现的问题')), await H.text('.status-box'));
+  const startedByIssue = await storeOf();
+  ok('功能清单存下来了', startedByIssue.length === started.length + 1 && startedByIssue.every((x) => x.fmd > 0), startedByIssue);
   await closeNewTab();
 
   console.log('旧的单文件计划书（已确认并且已经开始做）：页面里生成功能清单，第一次改动才存成文件');
@@ -352,7 +378,7 @@ try {
   ok('4.1 下面一条、4.2 下面三条（含之前已修的）', order.join('') === '功能问题功能问题问题问题', order.join(','));
 
   console.log('开始做之后：新增的功能记在功能清单里');
-  await page.click(Q('.status-head .btn.sm', '＋ 加功能', true));
+  await page.click(Q('.status-head .btn.sm', '＋ 添加功能', true));
   await page.click(Q('.modal input'));
   await page.insert('导出分享');
   await page.click(Q('.modal-foot button', '添加', true));
@@ -436,8 +462,8 @@ try {
   ok('最近页顶上提示悬浮窗要装扩展', (await HW.exists('.extrow .muted', '需要先安装浏览器扩展')) && (await HW.exists('.extrow button', '安装浏览器扩展', true)), await HW.text('.extrow'));
   await HW.wait(async () => HW.exists('.modal .ext-block'), 40);
   ok('第一次打开：安装说明自动弹出', await HW.exists('.modal .ext-block'), await HW.text('.modal'));
-  ok('第一次打开：已经自动登记给浏览器，弹窗里说明要点「启用」', /已登记到/.test((await HW.text('.modal .ext-status')) || ''), await HW.text('.modal .ext-status'));
-  ok('弹窗第一块是一键安装，Edge 和 Chrome 各一个按钮', (await HW.exists('.modal h3', '一键安装', true)) && (await HW.exists('.modal .btn.primary', '安装到')), await HW.text('.modal'));
+  ok('第一次打开：已经自动添加到浏览器，弹窗里说明要打开开关', /已添加到/.test((await HW.text('.modal .ext-status')) || ''), await HW.text('.modal .ext-status'));
+  ok('弹窗第一块是安装到浏览器，Edge 和 Chrome 各一个按钮', (await HW.exists('.modal h3', '安装到浏览器', true)) && (await HW.exists('.modal .btn.primary', '安装到')), await HW.text('.modal'));
   await win.key('Escape');
   await win.sleep(150);
   ok('关掉之后不再自动弹出，页面顶上仍有安装入口', !(await HW.exists('.modal')) && (await HW.exists('.extrow button', '安装浏览器扩展', true)));
@@ -475,6 +501,9 @@ try {
   ok('打开时只设置一次小窗口大小和位置', /^\[\["resize",360,480\],\["move",\d+,\d+\]\]$/.test(sizeAtOpen), sizeAtOpen);
   await win.shot(join(shots, '05-最近-420.png'));
   ok('框里没有单独的「打开」按钮', !(await HW.exists('.frow .btn.primary')));
+  const hubGeo = await win.eval('(function(){var b=__one(".body").getBoundingClientRect();var n=__deep(".hub-actions button").map(function(x){var r=x.getBoundingClientRect();return {t:x.textContent,top:r.top,bottom:r.bottom}});var f=__one(".frow").getBoundingClientRect();var p=getComputedStyle(__one(".fpath"));var nm=getComputedStyle(__one(".fname"));return {bodyTop:b.top,bodyBottom:b.bottom,btns:n,frowTop:f.top,pathSize:parseFloat(p.fontSize),nameSize:parseFloat(nm.fontSize),pathColor:p.color}})()');
+  ok('最近页：新建计划书、新建文件夹、选择别的文件夹在列表上面，不用滚动就能点', hubGeo.btns.length === 3 && hubGeo.btns.every((x) => x.bottom <= hubGeo.bodyBottom && x.bottom <= hubGeo.frowTop), hubGeo);
+  ok('最近页：文件夹地址比名称小、颜色是次要色', hubGeo.pathSize < hubGeo.nameSize && hubGeo.pathColor !== 'rgb(0, 0, 0)', hubGeo);
   await win.click(Q('.frow .fname'));
   await HW.wait(async () => HW.exists('.status-box'), 40);
   ok('点打开计划书：在新标签里打开', (await HW.exists('.tabbar .tab .tab-name', '番茄钟（示例）')) || (await HW.count('.tabbar .tab')) === 1, await HW.text('.tabbar'));
