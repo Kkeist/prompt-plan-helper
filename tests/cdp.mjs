@@ -31,12 +31,17 @@ export async function launch(recordFile, extraArgs) {
     '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
     '--window-size=1280,900', '--lang=zh-CN',
   ].concat((extraArgs || []).some((a) => a.indexOf('--load-extension') === 0) ? [] : ['--disable-extensions'], extraArgs || [], ['about:blank']), { stdio: 'ignore' });
-  try { os.setPriority(proc.pid, os.constants.priority.PRIORITY_LOW); } catch (e) { /* 优先级设置失败不影响测试 */ }
-  spawnSync('powershell', ['-NoProfile', '-Command', '(Get-Process -Id ' + proc.pid + ').ProcessorAffinity = 3'], { stdio: 'ignore' });
+  try { os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch (e) { /* 优先级设置失败不影响测试 */ }
   if (recordFile) writeFileSync(recordFile, JSON.stringify({ pid: proc.pid, port, dir }));
-  for (let i = 0; i < 60; i++) {
-    try { const r = await fetch('http://127.0.0.1:' + port + '/json/version'); if (r.ok) break; } catch (e) { /* 还没起来 */ }
-    await sleep(250);
+  // 机器忙时浏览器起得慢：等到 60 秒，仍没有监听就报错，不带着没起来的浏览器继续往下跑
+  let up = false;
+  for (let i = 0; i < 240 && !up; i++) {
+    try { up = (await fetch('http://127.0.0.1:' + port + '/json/version')).ok; } catch (e) { /* 还没起来 */ }
+    if (!up) await sleep(250);
+  }
+  if (!up) {
+    try { proc.kill(); } catch (e) { /* 进程已退出 */ }
+    throw new Error('浏览器没有在 60 秒内开始监听调试端口：' + port);
   }
   return {
     port,

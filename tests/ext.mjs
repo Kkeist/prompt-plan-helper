@@ -67,7 +67,7 @@ try {
   const root2 = '(function(){return document.querySelector("[data-shupian]").shadowRoot})()';
   const wtext = () => page.eval('(function(){var r=' + root2 + ';return r.querySelector(".fb-body").innerText})()');
   let unpaired = '';
-  for (let i = 0; i < 40 && !/先打开桌面小窗口/.test(unpaired); i++) { await page.sleep(150); unpaired = await wtext(); }
+  for (let i = 0; i < 120 && !/先打开桌面小窗口/.test(unpaired); i++) { await page.sleep(150); unpaired = await wtext(); }
   ok('没有打开过桌面小窗口：提示先打开', /先打开桌面小窗口/.test(unpaired), unpaired);
 
   // 打开桌面小窗口页面：扩展拿到端口和口令
@@ -141,7 +141,7 @@ try {
   await w2('var t=r.querySelector("textarea");t.focus();');
   await page2.insert('草稿里的一句话');
   let drafted = '';
-  for (let i = 0; i < 40 && !/草稿里的一句话/.test(drafted); i++) { await sleep(150); drafted = readDraftText(); }
+  for (let i = 0; i < 120 && !/草稿里的一句话/.test(drafted); i++) { await sleep(150); drafted = readDraftText(); }
   ok('没提交的问题存进了文件夹里的草稿', /草稿里的一句话/.test(drafted), drafted);
   const page5 = await chrome.newPage();
   await page5.init(DEEP);
@@ -198,7 +198,7 @@ try {
   await w4('r.querySelectorAll("button").forEach(function(b){if(b.textContent==="记到计划书")b.click()})');
   const featuresFile = join(proj, 'features.md');
   let featuresText = '';
-  for (let i = 0; i < 40 && !/点开始后界面没有变化/.test(featuresText); i++) {
+  for (let i = 0; i < 160 && !/点开始后界面没有变化/.test(featuresText); i++) {
     await sleep(150);
     try { featuresText = readFileSync(featuresFile, 'utf8'); } catch (e) { featuresText = ''; }
   }
