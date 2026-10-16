@@ -4,6 +4,8 @@
 
 Write the plan for a new project in plain words, and an AI builds from it. Once the plan is confirmed it becomes a feature list: every feature has a progress, and problems are written under the feature they belong to.
 
+**Use it online, nothing to install:** <https://prompt-planner.kkeist.com>. Write the plan, then copy it or export it as a file and give it to the AI.
+
 ## Use it
 
 1. **Web page.** Open `web/index.html`. Start a blank plan or view the example, click each block and write. Export the plan as a Markdown file, or import one to change it.

@@ -80,7 +80,10 @@ const privateFile = join(root, 'tools', '.private-words.txt');
 const privateWords = existsSync(privateFile) ? readFileSync(privateFile, 'utf8').split(/\r?\n/).map((w) => w.trim()).filter(Boolean) : [];
 const escapeRe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const banned = [/[A-Za-z]:\\Users\\/, /\/home\/[a-z0-9_-]+\//i].concat(privateWords.map((w) => new RegExp(escapeRe(w), 'i')));
-const hit = banned.filter((re) => re.test(bundle));
+// 哐哐工作室署名（语言文件里的 credit_ 开头几条）是允许出现的固定文字，扫描时先去掉
+const creditTexts = Object.keys(locales).flatMap((k) => Object.keys(locales[k].ui).filter((n) => n.indexOf('credit_') === 0).map((n) => JSON.stringify(locales[k].ui[n]).slice(1, -1))).filter(Boolean);
+const scanned = creditTexts.reduce((s, c) => s.split(c).join(''), bundle);
+const hit = banned.filter((re) => re.test(scanned));
 if (hit.length) {
   console.error(T('build_banned', { what: hit.map(String).join(' ') }));
   process.exit(1);

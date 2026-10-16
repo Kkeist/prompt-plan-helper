@@ -1659,6 +1659,18 @@ function createApp(opts) {
     return h('div', { class: 'col' }, actions, SERVER ? extensionRow(kit) : null, list);
   }
 
+  // 作品署名：头像在左，三行说明在右；第二行和链接连成一句
+  function creditBlock() {
+    const second = t('credit_same');
+    return h('div', { class: 'credit' },
+      h('img', { class: 'credit-avatar', src: t('credit_avatar'), alt: '', width: 48, height: 48 }),
+      h('div', { class: 'credit-text' },
+        h('div', { text: t('credit_by') }),
+        h('div', null,
+          second ? h('span', { text: second }) : null,
+          h('a', { class: 'link', href: t('credit_url'), target: '_blank', rel: 'noopener' }, t('credit_link')))));
+  }
+
   function renderBody() {
     const st = body.scrollTop;
     kit.closePop();
@@ -1680,6 +1692,7 @@ function createApp(opts) {
     } else {
       content = h('div', { class: 'col' }, renderPlan());
     }
+    if (!SERVER && S.view === 'plan') content.append(creditBlock());
     body.append(content);
     growAll(body);
     body.scrollTop = st;

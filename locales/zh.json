@@ -1,6 +1,11 @@
 {
   "name": "中文",
   "ui": {
+    "credit_by": "哐哐哐況 制作。",
+    "credit_same": "全网同名，更多好玩的请前往→",
+    "credit_link": "哐哐的个人站。",
+    "credit_url": "https://kb.kkeist.com/",
+    "credit_avatar": "credit/zh.png",
     "page": "页面",
     "feature": "功能",
     "the_what_name_cannot_be_empty": "{what}名称不能为空。",

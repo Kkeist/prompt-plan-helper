@@ -312,3 +312,9 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .ext-block { border: 1px solid var(--line); border-radius: 0.6em; padding: 0.5em 0.7em; margin: 0 0 0.6em; }
 .ext-block h3 { margin: 0 0 0.3em; font-size: 1em; }
 .bookmarklet { display: inline-block; border: 1px solid var(--ink); border-radius: 999px; padding: 0.3em 0.9em; margin: 0.2em 0; color: var(--ink); text-decoration: none; cursor: grab; }
+
+/* 作品署名 */
+.credit { display: flex; align-items: center; gap: 0.8em; margin: 2.4em 0 0; }
+.credit-avatar { flex: none; width: 48px; height: 48px; border-radius: 0.4em; object-fit: cover; }
+.credit-text { min-width: 0; font-size: 0.9em; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
+

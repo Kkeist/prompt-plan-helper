@@ -1,6 +1,11 @@
 {
   "name": "English",
   "ui": {
+    "credit_by": "created by KKeist",
+    "credit_same": "",
+    "credit_link": "Personal site",
+    "credit_url": "https://kk.kkeist.com/",
+    "credit_avatar": "credit/en.png",
     "page": "page",
     "feature": "feature",
     "the_what_name_cannot_be_empty": "The {what} name cannot be empty.",

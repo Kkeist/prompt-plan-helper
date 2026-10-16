@@ -61,6 +61,9 @@ const LS = {
 const LANG_LIST = Object.keys(LOCALES);
 
 let LANG = (function () {
+  // 地址里的 ?lang=zh|en 优先（被别的网页嵌入展示时指定界面语言），不写入存储
+  const asked = new URLSearchParams(location.search).get('lang');
+  if (LOCALES[asked]) return asked;
   const saved = LS.get('shupian:lang', '');
   if (LOCALES[saved]) return saved;
   const lang = String(navigator.language || '').toLowerCase();
