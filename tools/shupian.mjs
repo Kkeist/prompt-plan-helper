@@ -5,16 +5,13 @@
 //   node tools/shupian.mjs snapshot [计划书文件]              把功能清单当前的内容存成一份历史版本（直接改文件之前先运行）
 //   node tools/shupian.mjs app [hub|plan]                    打开桌面窗口（最近的文件夹，或计划书）
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
 import { basename, dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { STATE_FILE, snapshotFeatures } from './app-server.mjs';
+import { snapshotFeatures } from './history.mjs';
+import { Core, STATE_FILE, here, inRepo } from './base.mjs';
 import { T, locales } from './text.mjs';
 
-const require = createRequire(import.meta.url);
-const Core = require('../src/core.js');
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const root = join(here, '..');
 
 function planPath(arg) {
   if (arg) return resolve(arg);
@@ -240,7 +237,11 @@ else if (cmd === 'progress') progress(args);
 else if (cmd === 'issues') issues(args);
 else if (cmd === 'issue') issue(args);
 else if (cmd === 'snapshot') snapshot(args);
-else if (cmd === 'app') app(args[0]).then(() => process.exit(0));
+else if (cmd === 'app' && inRepo) app(args[0]).then(() => process.exit(0));
+else if (cmd === 'app') {
+  console.error(T('app_needs_repo'));
+  process.exit(2);
+}
 else {
   console.log(T('usage'));
   process.exit(cmd ? 2 : 0);

@@ -128,5 +128,14 @@ skillDirs.forEach((dir) => {
   });
 });
 
+// 公开的 AI 说明自带命令行：脚本、核心脚本（core.cjs）和语言文件放在 skill/scripts/，只装 skill/ 也能用
+const scripts = join(root, 'skill', 'scripts');
+mkdirSync(join(scripts, 'locales'), { recursive: true });
+['shupian.mjs', 'history.mjs', 'base.mjs', 'text.mjs'].forEach((f) => copyFileSync(join(root, 'tools', f), join(scripts, f)));
+const coreSrc = readFileSync(join(root, 'src', 'core.js'), 'utf8');
+if (coreSrc.indexOf("require('../locales/") < 0) throw new Error('core.js no longer loads ../locales');
+writeFileSync(join(scripts, 'core.cjs'), coreSrc.split("require('../locales/").join("require('./locales/"));
+readdirSync(join(root, 'locales')).filter((f) => f.endsWith('.json')).forEach((f) => copyFileSync(join(root, 'locales', f), join(scripts, 'locales', f)));
+
 console.log('built web/shupian.js ' + Math.round(bundle.length / 1024) + ' KB, hash ' + hash);
 console.log('keys: ' + keyCheck.used + '; field sections: zh ' + Object.keys(schema.zh.fields).join(',') + ' / en ' + Object.keys(schema.en.fields).join(','));

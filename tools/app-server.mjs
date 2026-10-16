@@ -9,14 +9,14 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { STATE_DIR, STATE_FILE } from './base.mjs';
+import { HISTORY_NAME_RE, historyDir, listHistory, norm, pruneHistory, snapshotFeatures } from './history.mjs';
 
 const require = createRequire(import.meta.url);
 const Core = require('../src/core.js');
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const webDir = join(projectRoot, 'web');
 const home = homedir();
-export const STATE_DIR = join(home, '.shupian');
-export const STATE_FILE = join(STATE_DIR, 'server.json');
 const HISTORY_FILE = join(STATE_DIR, 'history.json');
 const WATCH_ERROR_FILE = join(STATE_DIR, 'watch-error.txt');
 const PLAN_NAMES = Core.PLAN_NAMES;
@@ -34,10 +34,6 @@ function basePort() {
 
 function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch (e) { return fallback; }
-}
-
-function norm(p) {
-  return resolve(p).toLowerCase();
 }
 
 function claudeFolders() {
@@ -135,14 +131,6 @@ function known(root) {
   return claudeFolders().some((x) => norm(x.path) === n) || history().some((x) => norm(x.path) === n);
 }
 
-// 历史版本：文件夹里 .shupian/history/ 下，名字是 时间-功能清单文件名.md，每份功能清单只留最近的 HISTORY_KEEP 份
-const HISTORY_KEEP = 50;
-const HISTORY_NAME_RE = /^\d{8}-\d{6}-[^/\\:*?"<>|]+\.md$/;
-
-function historyDir(root) {
-  return join(resolve(root), '.shupian', 'history');
-}
-
 // 草稿：未提交的问题，文件夹里 .shupian/drafts/<计划书文件名>.json
 const DRAFT_NAME_RE = /^[^/\\:*?"<>|]+\.md\.json$/;
 
@@ -156,44 +144,6 @@ function planPath(root, rel) {
   const d = /^\.shupian\/drafts\/([^/]+)$/.exec(p);
   if (d && DRAFT_NAME_RE.test(d[1])) return join(resolve(root), '.shupian', 'drafts', d[1]);
   return '';
-}
-
-// 写了一份历史版本之后，同一份功能清单的旧版本只留最近的几份
-function pruneHistory(root, file) {
-  const dir = historyDir(root);
-  const mine = readdirSync(dir).filter((n) => HISTORY_NAME_RE.test(n) && n.slice(16).toLowerCase() === file.toLowerCase()).sort();
-  mine.slice(0, Math.max(0, mine.length - HISTORY_KEEP)).forEach((n) => unlinkSync(join(dir, n)));
-}
-
-function listHistory(root, file) {
-  const dir = historyDir(root);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((n) => HISTORY_NAME_RE.test(n) && n.slice(16).toLowerCase() === String(file).toLowerCase())
-    .sort().reverse()
-    .map((n) => ({ name: n, time: statSync(join(dir, n)).mtimeMs }));
-}
-
-// 功能清单被改写之前的旧版本：页面、命令行、AI 直接改文件都一样处理。
-// 有功能被去掉时马上存，平时隔 HISTORY_GAP 才存一份；和最新一份历史一样的不重复存；force 为真时不看间隔。
-const HISTORY_GAP = 5 * 60 * 1000;
-const lastSnap = new Map();
-const featureNames = (md) => Core.progressList(md).map((x) => x.name);
-
-export function snapshotFeatures(root, file, prev, next, force) {
-  if (!prev || !prev.trim() || prev === next) return false;
-  const key = norm(root) + '|' + file.toLowerCase();
-  const nextNames = featureNames(next || '');
-  const lost = featureNames(prev).some((n) => nextNames.indexOf(n) < 0);
-  const existing = listHistory(root, file);
-  const last = lastSnap.get(key) || (existing[0] ? existing[0].time : 0);
-  if (!force && !lost && Date.now() - last < HISTORY_GAP) return false;
-  if (existing[0] && readFileSync(join(historyDir(root), existing[0].name), 'utf8') === prev) return false;
-  mkdirSync(historyDir(root), { recursive: true });
-  writeFileSync(join(historyDir(root), Core.timeStamp() + '-' + file), prev);
-  pruneHistory(root, file);
-  lastSnap.set(key, Date.now());
-  return true;
 }
 
 // 每个已知文件夹里功能清单上次看到的内容：变了就把上一份存成历史版本

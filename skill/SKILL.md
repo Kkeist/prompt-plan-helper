@@ -9,9 +9,11 @@ The plan is a Markdown file in the project root: `plan.md` (or `计划书.md`). 
 
 Formats and the example (this tool's own plan) are in `references/zh` and `references/en`. Use the language the user writes in. 模板在 `references/` 里，使用用户所用的语言。
 
+Commands below run from this skill's own folder: `node scripts/shupian.mjs …` is the file `scripts/shupian.mjs` next to this SKILL.md; give it the full path of that file when your working directory is the project. It needs only Node.js. 下面的命令用的是本 skill 文件夹里的 `scripts/shupian.mjs`，在项目目录里运行时写上它的完整路径，只需要 Node.js。
+
 ## Before starting / 开工前
 
-1. `node tools/shupian.mjs check plan.md`: status, what is TBD, duplicate names. Exit code 0 means nothing is TBD.
+1. `node scripts/shupian.mjs check plan.md`: status, what is TBD, duplicate names. Exit code 0 means nothing is TBD.
 2. If there is no plan, write one from the user's words. If something is TBD, ask; fill it in only after the user answers. 没有计划书就写；有待补就询问，用户回答后再填。
 3. Work starts only when nothing is TBD and the user has confirmed. 没有待补并且用户确认之后才开始制作。
 
@@ -39,7 +41,7 @@ Architecture is decoupled by default and is not asked of the user: modules expos
 
 ## While building / 制作过程中
 
-- Starting a feature: `node tools/shupian.mjs progress plan.md "<feature name>" doing`
+- Starting a feature: `node scripts/shupian.mjs progress plan.md "<feature name>" doing`
 - Finished and checked: `... done`
 - The user watches the feature list on the page, so keep it true. 用户在页面上看着功能清单，进度要和实际一致。
 - The feature list is an index of what already exists: a feature is listed above once its progress is not `todo`; features not started stay folded under "Not built yet". Write the progress as you go, otherwise nothing shows up. 功能清单是已经有的东西的索引：进度不是「未做」的功能才列在上面，没开始的收起在「还没做」里；边做边写进度，不然页面上什么都看不到。
@@ -52,11 +54,11 @@ Under a feature the user may add a line under `Issues:` (`问题：`), on the pa
 
 Each issue has a state shown live in the feature list: no prefix (to do), `Working:` / `处理中：` (being fixed), `Fixed:` / `已修：` (done).
 
-1. List them: `node tools/shupian.mjs issues <plan>` (numbered; it reads the feature list when there is one). Fix the ones that are not `Fixed`.
-2. When you start one, set it to working; when the fix is checked, set it to done. Do not delete it: `node tools/shupian.mjs issue <plan> <number> doing|done`.
+1. List them: `node scripts/shupian.mjs issues <plan>` (numbered; it reads the feature list when there is one). Fix the ones that are not `Fixed`.
+2. When you start one, set it to working; when the fix is checked, set it to done. Do not delete it: `node scripts/shupian.mjs issue <plan> <number> doing|done`.
 3. A problem that reveals a gap in the plan is also written into the plan first, then fixed. 暴露出计划书缺口的问题，先补计划书再修。
 4. Once work has started the initial plan is not changed any more: new features, changed features, progress and issues are all made in the feature list, and the progress you set there is the state of the work right now. 开始做之后初始计划书不再改，加功能、改功能、进度和问题都记在功能清单里，进度代表当下的情况。
-5. Do not delete features the user wrote in the feature list. Earlier versions are kept in `.shupian/history/` of the project folder: the desktop helper saves one by itself whenever the file changes, and the `progress` / `issue` commands save one before writing. Before editing the file directly, run `node tools/shupian.mjs snapshot <plan>` so the version before your edit is kept even when the helper is not running. The same folder holds the user's unsent issue drafts (`.shupian/drafts/`); leave `.shupian/` alone.
+5. Do not delete features the user wrote in the feature list. Earlier versions are kept in `.shupian/history/` of the project folder: the desktop helper saves one by itself whenever the file changes, and the `progress` / `issue` commands save one before writing. Before editing the file directly, run `node scripts/shupian.mjs snapshot <plan>` so the version before your edit is kept even when the helper is not running. The same folder holds the user's unsent issue drafts (`.shupian/drafts/`); leave `.shupian/` alone.
 
 ## Feedback from the floating window / 悬浮窗来的反馈
 
@@ -70,5 +72,4 @@ The user pastes text with the page address, window size, the element they mean (
 
 ## Windows
 
-- `node tools/shupian.mjs app hub`: the small window listing recent folders (the one in use is marked), with a copy-path button.
-- `node tools/shupian.mjs app plan`: the plan window.
+The small window listing recent folders is opened by the user with the desktop app (Ctrl+Alt+S). This skill's script has no `app` command; it exists only in the full repository (`node tools/shupian.mjs app hub` / `app plan`). 小窗口由用户用桌面版打开（Ctrl+Alt+S）；本 skill 的脚本没有 `app` 命令，完整仓库里才有。
