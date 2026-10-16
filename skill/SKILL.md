@@ -70,6 +70,19 @@ The user pastes text with the page address, window size, the element they mean (
 
 用户贴来的反馈：先用一句话复述（在哪、做了什么、期望什么、实际什么），对到功能清单里的功能；分清是需求还是问题；再用元素路径和样式定位，找不到才看截图。
 
+## A page window without any extension / 不装扩展的页面小窗
+
+When you build a web page for the user, add this once at the start (a few lines; works in every browser, no extension). List only the main controls in `parts`; put in `tune` only values the user may want to adjust (`key, label, min, max, step, value, apply(v)`); leave it empty if there are none. 做网页时开工就加上这几行，不装扩展任何浏览器都能用；`parts` 只列主要控件，`tune` 只放用户可能想调的数值。
+
+```html
+<script>
+window.SHUPIAN_ME = { parts: [{ name: 'Start button', selector: '#start' }], tune: [] };
+</script>
+<script src="https://prompt-planner.kkeist.com/shupian.js"></script>
+```
+
+The window appears only on `localhost`, a local file, or an address with `?shupian=1`, so visitors of a published page do not see it. The user copies the feedback it produces (page address, parts, element, adjusted values) to you; write the adjusted values back as the defaults in the source. 窗口只在本机、本地文件或地址带 `?shupian=1` 时出现；用户把它生成的反馈复制给你，把调过的值写回源码默认值。
+
 ## Windows
 
 The small window listing recent folders is opened by the user with the desktop app (Ctrl+Alt+S). This skill's script has no `app` command; it exists only in the full repository (`node tools/shupian.mjs app hub` / `app plan`). 小窗口由用户用桌面版打开（Ctrl+Alt+S）；本 skill 的脚本没有 `app` 命令，完整仓库里才有。

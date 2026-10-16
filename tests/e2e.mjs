@@ -755,6 +755,7 @@ try {
   ok('没有连计划书：显示声明的部件', await HM.exists('.part-list button', '开始按钮', true), await HM.text('.parts'));
   ok('声明的部件没有去掉按钮', (await HM.count('.part-list .x')) === 0);
   ok('显示可调参数：名称、滑块、数字框', (await HM.exists('.tune-label', '弹性')) && (await HM.exists('.tune-range')) && (await mpage.eval('__one(".tune-num").value')) === '0.4');
+  ok('可调参数一行：滑块有宽度，数字框在小窗里面', await mpage.eval('(function(){var r=__one(".tune-range").getBoundingClientRect(),n=__one(".tune-num").getBoundingClientRect(),w=__one(".win").getBoundingClientRect();return r.width>60&&n.left>=w.left&&n.right<=w.right})()'));
   await mpage.click(fq('.part-list button', '开始按钮', true));
   await mpage.sleep(150);
   ok('点部件：当前这一条问题 @ 它', /开始按钮/.test((await HM.text('.ilist .target')) || ''), await HM.text('.ilist .target'));
