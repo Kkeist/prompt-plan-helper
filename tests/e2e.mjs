@@ -142,6 +142,23 @@ try {
   ok('导出了一个 md 文件，名字带日期时间', dl.length === 1 && /^.+-\d{8}-\d{6}\.md$/.test(dl[0].name), dl.map((x) => x.name));
   ok('导出的内容是这份计划书', dl.length === 1 && /番茄钟/.test(dl[0].text) && /### 4\.2/.test(dl[0].text), dl.length ? dl[0].text.slice(0, 60) : '');
 
+  console.log('给 AI 的话：默认英文，可以切换');
+  await page.click(btn('⋯'));
+  await page.sleep(150);
+  await page.click(btn('复制提示词'));
+  await page.sleep(300);
+  const aiEn = await page.eval('__deep(".modal textarea.big")[0].value');
+  ok('界面是中文，给 AI 的话默认是英文', /Turn the content below into a plan/.test(aiEn) && !/[一-鿿]{4}/.test(aiEn.split('```')[0]), aiEn.slice(0, 80));
+  await page.click(Q('.modal .lang'));
+  await page.sleep(150);
+  await page.click(Q('.pop button', '中文', true));
+  await page.sleep(200);
+  const aiZh = await page.eval('__deep(".modal textarea.big")[0].value');
+  ok('切到中文之后是中文的话', !/Turn the content below into a plan/.test(aiZh) && /[一-鿿]{4}/.test(aiZh.split('```')[0]), aiZh.slice(0, 40));
+  await page.key('Escape');
+  await page.sleep(150);
+  ok('关掉弹窗', !(await H.exists('.modal')));
+
   console.log('标签页和语言下拉');
   ok('有一个项目标签', (await H.count('.tabbar .tab')) === 1);
   await page.click(Q('.tabbar .chip.add'));

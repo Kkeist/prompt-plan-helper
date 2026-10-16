@@ -1389,14 +1389,29 @@ function createApp(opts) {
     toast(t('example_loaded'), { label: t('undo'), run: () => undo() });
   }
 
+  // 给 AI 的话默认用英文写，可以切换成别的语言（和界面语言无关）
   function openAiPrompt() {
+    let promptLang = LOCALES.en ? 'en' : LANG;
     const note = h('textarea', { class: 'in', rows: 3, placeholder: t('describe_what_you_want_to_make'), 'aria-label': t('notes') });
     const out = h('textarea', { class: 'in big', readonly: true, 'aria-label': t('words_for_the_ai') });
-    const refresh = () => { out.value = Core.buildAiPrompt(S.md, SCHEMA, note.value, LANG); autoGrow(out); };
+    const langBtn = h('button', { type: 'button', class: 'lang', title: t('language'), 'aria-label': t('language') });
+    const refresh = () => {
+      langBtn.textContent = LOCALES[promptLang].name + ' ▾';
+      out.value = Core.buildAiPrompt(S.md, SCHEMA, note.value, promptLang);
+      autoGrow(out);
+    };
+    langBtn.addEventListener('click', () => {
+      kit.openPop(langBtn, (pop) => {
+        LANG_LIST.forEach((k) => pop.append(kit.popItem(LOCALES[k].name, () => { promptLang = k; refresh(); }, { on: promptLang === k })));
+      });
+    });
     note.addEventListener('input', () => { autoGrow(note); refresh(); });
     kit.openModal({
       title: t('copy_prompt'),
-      body: h('div', null, h('div', { class: 'field' }, h('div', { class: 'fl', text: t('notes') }), note), h('div', { class: 'field' }, h('div', { class: 'fl', text: t('prompt_content') }), out)),
+      body: h('div', null,
+        h('div', { class: 'field' }, h('div', { class: 'fl', text: t('language') }), langBtn),
+        h('div', { class: 'field' }, h('div', { class: 'fl', text: t('notes') }), note),
+        h('div', { class: 'field' }, h('div', { class: 'fl', text: t('prompt_content') }), out)),
       foot: (close) => [
         h('button', { type: 'button', class: 'btn', onclick: close }, t('close')),
         h('button', { type: 'button', class: 'btn primary', onclick() { copyThen(kit, out.value, out); } }, t('copy')),
