@@ -24,6 +24,8 @@ Write the plan for a new project in plain words, and an AI builds from it. Once 
    <script src="https://prompt-planner.kkeist.com/shupian.js"></script>
    ```
 
+   For a game, `stages: [{ name: 'Level 5', values: { bounce: 0.9 } }]` adds a progress row: choosing one sets all the listed values at once.
+
    Parts you pick on the page are remembered in this browser, per page address, as are the values you adjust (applied again on the next visit). A page that declares `SHUPIAN_ME` shows the window only on `localhost`, `127.0.0.1` or a file, or when the address has `?shupian=1` (that turns it on in this browser), so a published page stays clean for visitors.
 
 The interface follows the browser language and has a language menu. The words copied for the AI are English by default and can be switched to Chinese.

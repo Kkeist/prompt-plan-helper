@@ -778,8 +778,16 @@ try {
   await mpage.eval('(function(){var n=__one(".tune-num");n.value="9";n.dispatchEvent(new Event("change",{bubbles:true}))})()');
   await mpage.sleep(150);
   ok('超出范围：收回到最大值', (await mpage.eval('__one(".tune-num").value')) === '1');
+  ok('有进度一排，每一档一个选项', (await HM.exists('.stage-row .chip', '第 1 关', true)) && (await HM.exists('.stage-row .chip', '第 5 关', true)));
+  await mpage.click(fq('.stage-row .chip', '第 5 关', true));
+  await mpage.sleep(200);
+  ok('点一档进度：参数一起设好并交给页面，这一档高亮', (await mpage.eval('document.getElementById("out").textContent')) === '弹性 0.9' && (await mpage.eval('__one(".tune-num").value')) === '0.9' && (await mpage.eval('__one(".stage-row .chip.on").textContent')) === '第 5 关');
+  await mpage.click(fq('button', '复制文字', true));
+  await mpage.sleep(200);
+  ok('参数正好等于一档时，复制的文字里写着进度', /进度：第 5 关/.test(await mpage.eval('window.__clip')), await mpage.eval('window.__clip'));
   await mpage.eval('(function(){var n=__one(".tune-num");n.value="0.8";n.dispatchEvent(new Event("change",{bubbles:true}))})()');
   await mpage.sleep(100);
+  ok('手动改了值：不再高亮任何一档', (await mpage.eval('__deep(".stage-row .chip.on").length')) === 0);
   // 写一条问题并复制
   await mpage.click(fq('.ilist textarea'));
   await mpage.insert('点了没反应');

@@ -222,6 +222,7 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .toast { position: absolute; z-index: var(--z-toast); left: 0.8em; right: 0.8em; bottom: calc(var(--composer-h, 0px) + 0.8em); margin: 0 auto; max-width: 30em; display: flex; align-items: center; background: var(--ink); color: var(--paper); border-radius: 0.55em; padding: 0.45em 0.5em 0.45em 0.85em; cursor: pointer; }
 .toast span { flex: 1; overflow-wrap: anywhere; }
 .toast .btn { background: var(--paper); color: var(--ink); border-color: var(--paper); flex: none; margin-left: 0.6em; }
+.fb .toast { bottom: 4.2em; }
 
 /* 滚动条：黑色细条，没有箭头 */
 .body::-webkit-scrollbar, .composer::-webkit-scrollbar, .pos-list::-webkit-scrollbar, .modal-body::-webkit-scrollbar, .pop::-webkit-scrollbar { width: 0.6em; height: 0.6em; }
@@ -340,6 +341,9 @@ textarea.in.big { min-height: 9em; line-height: 1.7; }
 .part-list { display: flex; flex-wrap: wrap; margin-top: 0.3em; }
 .part-list .ftag { margin: 0 0.35em 0.35em 0; }
 .part-name { flex: 1; min-width: 0; }
+.stage-row { display: flex; overflow-x: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: 0.3em; }
+.stage-row::-webkit-scrollbar { display: none; }
+.stage-row .chip { margin-right: 0.4em; white-space: nowrap; }
 .tune-row:last-child { margin-bottom: 0.3em; }
 .tune-row { display: flex; align-items: center; margin-top: 0.3em; }
 .tune-label { flex: none; max-width: 30%; margin-right: 0.5em; overflow-wrap: anywhere; }

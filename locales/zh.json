@@ -13,6 +13,8 @@
     "write_a_note": "写说明",
     "plan": "计划书",
     "click_a_part_to_aim_the_note_at_it": "点一个部件，说明就针对它。",
+    "stage_title": "进度",
+    "stage_label": "进度：{name}",
     "tune_title": "可调参数",
     "tuned_value": "调过的参数：{label} = {value}（原来 {was}）",
     "submit": "提交",

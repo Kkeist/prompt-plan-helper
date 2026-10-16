@@ -135,6 +135,8 @@ function createFeedback(opts) {
     items.forEach((it) => it.fs.forEach((f) => {
       if (f.sel && seen.indexOf(f.name) < 0) { seen.push(f.name); out.push(t('where_part') + f.name + '（' + f.sel + '）'); }
     }));
+    const stage = Stages.current();
+    if (stage) out.push(t('stage_label', { name: stage.name }));
     Tune.changed().forEach((c) => out.push(t('tuned_value', { label: c.label, value: c.value, was: c.was })));
     return out.length ? [out.join('\n')] : [];
   }
@@ -202,24 +204,43 @@ function createFeedback(opts) {
     return box;
   }
 
+  // 进度档位：一排选项，点一个就把那一档的所有参数一起设好
+  function stagesBlock() {
+    const stages = Stages.list();
+    if (!stages.length || !Tune.list().length) return null;
+    const box = section(t('stage_title'));
+    const row = h('div', { class: 'stage-row' });
+    stages.forEach((s) => row.append(h('button', { type: 'button', class: 'chip' + (Stages.current() === s ? ' on' : ''), onclick() {
+      Stages.apply(s);
+      const top = body.scrollTop;
+      render();
+      body.scrollTop = top;
+    } }, s.name)));
+    box.append(row);
+    return box;
+  }
+
   // 网页声明的可调参数：滑块加数字框，调了立刻交给网页，并记在这个浏览器里
   function tuneBlock() {
     const items = Tune.list();
     if (!items.length) return null;
     const box = section(t('tune_title'));
     box.classList.add('tune');
+    // 手动改了值，进度档位的高亮跟着更新
+    const syncStages = () => Array.prototype.forEach.call(body.querySelectorAll('.stage-row .chip'), (b, i) => b.classList.toggle('on', Stages.list()[i] === Stages.current()));
     items.forEach((x) => {
       const name = x.label || x.key;
       const step = x.step || (x.max - x.min) / 100;
       const show = (v) => String(Number(Number(v).toFixed(4)));
       const range = h('input', { class: 'tune-range', type: 'range', min: x.min, max: x.max, step, value: Tune.value(x), 'aria-label': name });
       const num = h('input', { class: 'in tune-num', type: 'text', inputmode: 'decimal', 'aria-label': name, value: show(Tune.value(x)) });
-      range.addEventListener('input', () => { num.value = show(Tune.set(x, range.value)); });
+      range.addEventListener('input', () => { num.value = show(Tune.set(x, range.value)); syncStages(); });
       num.addEventListener('input', () => { num.value = num.value.replace(/[^0-9.-]/g, ''); });
       num.addEventListener('change', () => {
         const v = Tune.set(x, num.value);
         num.value = show(v);
         range.value = String(v);
+        syncStages();
       });
       box.append(h('div', { class: 'tune-row' }, h('span', { class: 'tune-label', text: name }), range, num));
     });
@@ -391,7 +412,7 @@ function createFeedback(opts) {
         : link.why === 'unpaired' ? t('open_the_desktop_window_first_to_add_issues') : t('the_desktop_window_did_not_respond_only');
       body.append(h('div', { class: 'fb-sec' }, h('p', { class: 'hint', text: why })));
     }
-    [partsBlock(), tuneBlock()].forEach((x) => { if (x) body.append(x); });
+    [partsBlock(), stagesBlock(), tuneBlock()].forEach((x) => { if (x) body.append(x); });
     const write = section(t('write_a_note'));
     write.append(list.el);
     body.append(write);

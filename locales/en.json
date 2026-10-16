@@ -13,6 +13,8 @@
     "write_a_note": "Describe it",
     "plan": "Plan",
     "click_a_part_to_aim_the_note_at_it": "Click a part to aim your note at it.",
+    "stage_title": "Progress",
+    "stage_label": "Progress: {name}",
     "tune_title": "Adjustable values",
     "tuned_value": "Changed value: {label} = {value} (was {was})",
     "submit": "Submit",

@@ -4,6 +4,7 @@
 //   window.SHUPIAN_ME = {
 //     parts: [{ name: '开始按钮', selector: '#start' }],
 //     tune: [{ key: 'bounce', label: '弹性', min: 0, max: 1, step: 0.05, value: 0.4, apply(v) { game.bounce = v; } }],
+//     stages: [{ name: '第 3 关', values: { bounce: 0.6 } }],   // 一档进度：选中时 values 里的每个参数一起设成这些值
 //   };
 // 圈选的部件和调过的参数记在这个浏览器里，按页面地址分开；调过的参数下次打开页面时自动再用一遍。
 
@@ -75,5 +76,25 @@ const Tune = {
   // 调过的（和声明里的原值不同）：[{ label, value, was }]
   changed() {
     return Tune.list().filter((x) => Tune.value(x) !== x.value).map((x) => ({ label: x.label || x.key, value: Tune.value(x), was: x.value }));
+  },
+};
+
+// 进度档位：一次设好一整组参数（比如「第 3 关」对应的金币、血量、速度），测试不同进度下的样子
+const Stages = {
+  list() {
+    const d = meDeclared();
+    return (d && Array.isArray(d.stages) ? d.stages : []).filter((s) => s && s.name && s.values && typeof s.values === 'object');
+  },
+  // 只设 tune 里有的参数
+  apply(stage) {
+    Tune.list().forEach((item) => { if (typeof stage.values[item.key] === 'number') Tune.set(item, stage.values[item.key]); });
+  },
+  // 当前所有参数正好等于哪一档（没有就是 null）
+  current() {
+    const tunes = Tune.list();
+    return Stages.list().filter((s) => {
+      const keys = tunes.filter((x) => typeof s.values[x.key] === 'number');
+      return keys.length > 0 && keys.every((x) => Tune.value(x) === Math.min(x.max, Math.max(x.min, s.values[x.key])));
+    })[0] || null;
   },
 };

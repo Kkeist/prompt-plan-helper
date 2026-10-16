@@ -83,6 +83,19 @@ window.SHUPIAN_ME = { parts: [{ name: 'Start button', selector: '#start' }], tun
 
 The window appears only on `localhost`, a local file, or an address with `?shupian=1`, so visitors of a published page do not see it. The user copies the feedback it produces (page address, parts, element, adjusted values) to you; write the adjusted values back as the defaults in the source. 窗口只在本机、本地文件或地址带 `?shupian=1` 时出现；用户把它生成的反馈复制给你，把调过的值写回源码默认值。
 
+## Game cheat panel / 游戏作弊器
+
+For a game, add two kinds of controls from the start: single values (`tune`, one per number such as coins, health, speed) and progress (`stages`: one entry per level; choosing it sets every value of that level at once, so the user can see the game at different progress). Work out each level's values yourself from the game's difficulty. 做游戏时开工就带上：单项数值（`tune`）和进度档位（`stages`，选一档就把该关的所有数值一起设好），各关数值由你按游戏的难度算好。
+
+```js
+window.SHUPIAN_ME = {
+  tune: [{ key: 'coins', label: 'Coins', min: 0, max: 9999, step: 1, value: 0, apply(v) { game.coins = v; } }],
+  stages: [{ name: 'Level 1', values: { coins: 0 } }, { name: 'Level 5', values: { coins: 400 } }],
+};
+```
+
+Keep the cheat panel out of the released game: put the declaration and the script tag in `cheat.js` / `cheat.html` only (a copy of `index.html` with those two added), start the normal game with `start.bat` and the cheat one with `start-cheat.bat`, and leave `cheat.*` out of the published files. 作弊器不进正式版：声明和脚本引用只放在 `cheat.js` / `cheat.html`，启动给两个入口，发布时不带 `cheat.*`。
+
 ## Windows
 
 The small window listing recent folders is opened by the user with the desktop app (Ctrl+Alt+S). This skill's script has no `app` command; it exists only in the full repository (`node tools/shupian.mjs app hub` / `app plan`). 小窗口由用户用桌面版打开（Ctrl+Alt+S）；本 skill 的脚本没有 `app` 命令，完整仓库里才有。
