@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "薯片计划助手",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "在任何网页上打开悬浮窗：选取元素、区域截图、记录当前页面，并复制修改说明。",
   "icons": {
     "16": "icons/16.png",
