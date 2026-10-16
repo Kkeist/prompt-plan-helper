@@ -351,6 +351,7 @@
     "window_check_failed": "无法检查已打开的窗口：{why}",
     "service_not_started": "桌面服务没有启动。",
     "window_raised": "小窗口已经打开，已移到最前面。",
+    "window_not_found": "小窗口已打开，但没有找到它的窗口，任务栏上的按钮没有去掉。",
     "no_browser": "没有找到 Edge 或 Chrome，请直接打开：{url}",
     "opened": "已打开：{url}",
     "usage": "用法：node tools/shupian.mjs check [计划书] | progress [计划书] [功能名 todo|doing|done] | issues [计划书] | issue [计划书] <序号> todo|doing|done | snapshot [计划书] | app [hub|plan]",

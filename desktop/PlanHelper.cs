@@ -140,6 +140,21 @@ static class WinApi
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] public static extern bool AllowSetForegroundWindow(int pid);
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
+    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int index, int value);
+    const int GWL_EXSTYLE = -20;
+    const int WS_EX_TOOLWINDOW = 0x80;
+    const int WS_EX_APPWINDOW = 0x40000;
+
+    // 小窗口只留托盘图标，不在任务栏和 Alt+Tab 里出现：改样式前先隐藏，改完再不抢焦点地显示，任务栏才会更新
+    public static void HideFromTaskbar(IntPtr h)
+    {
+        var ex = GetWindowLong(h, GWL_EXSTYLE);
+        if ((ex & WS_EX_TOOLWINDOW) != 0 && (ex & WS_EX_APPWINDOW) == 0) return;
+        ShowWindow(h, 0);
+        SetWindowLong(h, GWL_EXSTYLE, (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW);
+        ShowWindow(h, 8);
+    }
 
     // 找已经打开的小窗口：浏览器应用窗口，标题是页面标题
     public static IntPtr FindWindow(string[] titles)
@@ -298,6 +313,7 @@ class Host : ApplicationContext
         if (existing != IntPtr.Zero)
         {
             WinApi.Raise(existing);
+            WinApi.HideFromTaskbar(existing);
             return;
         }
         var url = server.Url("&win=1&view=hub");
@@ -308,6 +324,25 @@ class Host : ApplicationContext
             return;
         }
         Process.Start(browser, "--app=\"" + url + "\" --window-size=360,480");
+        HideNewWindowFromTaskbar();
+    }
+
+    // 新开的窗口标题出现之后（页面载入完成），把它从任务栏拿掉
+    void HideNewWindowFromTaskbar()
+    {
+        var tries = 0;
+        var timer = new System.Windows.Forms.Timer { Interval = 150 };
+        timer.Tick += (s, e) =>
+        {
+            var h = WinApi.FindWindow(Vocab.Titles());
+            if (h != IntPtr.Zero) WinApi.HideFromTaskbar(h);
+            if (h != IntPtr.Zero || ++tries > 100)
+            {
+                timer.Stop();
+                timer.Dispose();
+            }
+        };
+        timer.Start();
     }
 
     protected override void ExitThreadCore()

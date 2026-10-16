@@ -350,6 +350,7 @@
     "window_check_failed": "Could not check for an open window: {why}",
     "service_not_started": "The desktop service did not start.",
     "window_raised": "The small window is already open and has been brought to the front.",
+    "window_not_found": "The small window opened, but its window was not found, so its taskbar button was not removed.",
     "no_browser": "Edge or Chrome was not found. Open this address directly: {url}",
     "opened": "Opened: {url}",
     "usage": "Usage: node tools/shupian.mjs check [plan] | progress [plan] [feature todo|doing|done] | issues [plan] | issue [plan] <number> todo|doing|done | snapshot [plan] | app [hub|plan]",

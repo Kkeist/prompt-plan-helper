@@ -152,10 +152,10 @@ function browserPath() {
   return list.filter((p) => existsSync(p) && statSync(p).isFile())[0] || '';
 }
 
-// 已经有打开的小窗口时把它拿到最前面，返回 true；没有就返回 false
-const RAISE_SCRIPT = `
+// 小窗口只留托盘，不在任务栏出现；已经有打开的小窗口时把它拿到最前面
+const WINDOW_SCRIPT = `
 Add-Type -TypeDefinition @'
-using System; using System.Text; using System.Runtime.InteropServices;
+using System; using System.Text; using System.Threading; using System.Runtime.InteropServices;
 public class W {
   delegate bool P(IntPtr h, IntPtr l);
   [DllImport("user32.dll")] static extern bool EnumWindows(P p, IntPtr l);
@@ -166,7 +166,9 @@ public class W {
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int c);
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] static extern void keybd_event(byte v, byte s, uint f, UIntPtr e);
-  public static bool Raise(string[] titles) {
+  [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
+  [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int i, int v);
+  static IntPtr Find(string[] titles) {
     IntPtr hit = IntPtr.Zero;
     EnumWindows((h, l) => {
       if (!IsWindowVisible(h)) return true;
@@ -176,26 +178,58 @@ public class W {
       if (Array.IndexOf(titles, t.ToString()) >= 0) { hit = h; return false; }
       return true;
     }, IntPtr.Zero);
+    return hit;
+  }
+  static void NoTaskbar(IntPtr h) {
+    int ex = GetWindowLong(h, -20);
+    if ((ex & 0x80) != 0 && (ex & 0x40000) == 0) return;
+    ShowWindow(h, 0);
+    SetWindowLong(h, -20, (ex | 0x80) & ~0x40000);
+    ShowWindow(h, 8);
+  }
+  public static bool Raise(string[] titles) {
+    IntPtr hit = Find(titles);
     if (hit == IntPtr.Zero) return false;
     if (IsIconic(hit)) ShowWindow(hit, 9);
+    NoTaskbar(hit);
     keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);
     SetForegroundWindow(hit);
     return true;
   }
+  public static bool Wait(string[] titles) {
+    for (int i = 0; i < 100; i++) {
+      IntPtr hit = Find(titles);
+      if (hit != IntPtr.Zero) { NoTaskbar(hit); return true; }
+      Thread.Sleep(150);
+    }
+    return false;
+  }
 }
 '@
-if ([W]::Raise([string[]]($env:SHUPIAN_TITLES -split '\|'))) { 'raised' } else { 'none' }
+$titles = [string[]]($env:SHUPIAN_TITLES -split '\\|')
+if ($env:SHUPIAN_MODE -eq 'wait') { if ([W]::Wait($titles)) { 'hidden' } else { 'none' } }
+elseif ([W]::Raise($titles)) { 'raised' } else { 'none' }
 `;
 
-function raiseExisting() {
-  // 小窗口的标题：每种语言里页面标题的文字
+// 小窗口的标题：每种语言里页面标题的文字
+function windowEnv(mode) {
   const titles = Object.keys(locales).map((k) => locales[k].ui.prompt_plan_helper).join('|');
-  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', RAISE_SCRIPT], { encoding: 'utf8', windowsHide: true, env: Object.assign({}, process.env, { SHUPIAN_TITLES: titles }) });
+  return Object.assign({}, process.env, { SHUPIAN_TITLES: titles, SHUPIAN_MODE: mode });
+}
+
+function raiseExisting() {
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', WINDOW_SCRIPT], { encoding: 'utf8', windowsHide: true, env: windowEnv('raise') });
   if (r.status !== 0) {
     console.error(T('window_check_failed', { why: (r.stderr || '').trim() }));
     process.exit(2);
   }
   return /raised/.test(r.stdout);
+}
+
+// 新开的窗口出现之后把它从任务栏拿掉；最多等十几秒，等不到要说出来
+function hideNewWindowFromTaskbar() {
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', WINDOW_SCRIPT], { encoding: 'utf8', windowsHide: true, env: windowEnv('wait') });
+  if (r.status !== 0 || !/hidden/.test(r.stdout)) console.error(T('window_not_found'));
 }
 
 async function ping(info) {
@@ -228,6 +262,7 @@ async function app(view) {
   const url = 'http://127.0.0.1:' + info.port + '/index.html?k=' + info.token + '&win=1' + (hub ? '&view=hub' : '');
   if (!exe) { console.error(T('no_browser', { url })); process.exit(2); }
   spawn(exe, ['--app=' + url, '--window-size=360,480'], { detached: true, stdio: 'ignore' }).unref();
+  hideNewWindowFromTaskbar();
   console.log(T('opened', { url: url.replace(info.token, '***') }));
 }
 
